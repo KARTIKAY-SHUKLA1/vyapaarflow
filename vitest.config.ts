@@ -11,6 +11,11 @@ export default defineConfig({
     env: {
       SESSION_SECRET: "test-secret-test-secret-test-secret-0123456789",
       DATABASE_URL: ":memory:",
+      // Tests never call a real model, whatever is exported in the developer shell.
+      AI_PROVIDER: "none",
+      ANTHROPIC_API_KEY: "",
+      AI_BASE_URL: "",
+      AI_MODEL: "",
     },
   },
 });
