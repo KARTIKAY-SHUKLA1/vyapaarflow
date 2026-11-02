@@ -1,6 +1,8 @@
 import { rulesLine, type AnalysedSegment } from "./line";
 import {
   MODEL_TIMEOUT_MS,
+  ModelBlockedError,
+  ModelIncompleteError,
   ModelOutputError,
   ModelTimeoutError,
   type CaptureModel,
@@ -72,6 +74,9 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
 
 function fallbackReason(error: unknown): string {
   if (error instanceof ModelTimeoutError) return "model_timeout";
+  // Subclasses first: a block or a cut-off answer is shown to the desk as such.
+  if (error instanceof ModelBlockedError) return "model_blocked";
+  if (error instanceof ModelIncompleteError) return "model_incomplete";
   if (error instanceof ModelOutputError) return "model_invalid_output";
   return "model_error";
 }

@@ -95,6 +95,10 @@ export function renderUserPrompt(req: ModelRequest): string {
 
 /** The model answered, but not with usable JSON (refusal, truncation, bad JSON). */
 export class ModelOutputError extends Error {}
+/** The provider refused to answer (safety / policy block). A kind of unusable output. */
+export class ModelBlockedError extends ModelOutputError {}
+/** The answer was cut off (e.g. token limit), so it cannot be trusted to match the schema. */
+export class ModelIncompleteError extends ModelOutputError {}
 /** No answer within the time budget. */
 export class ModelTimeoutError extends Error {}
 

@@ -8,6 +8,7 @@ import {
   SYSTEM_PROMPT,
   type CaptureModel,
 } from "./llm";
+import { createGeminiModel } from "./gemini";
 
 /**
  * Provider selection. The model is swappable so the distributor can pick an
@@ -22,6 +23,8 @@ export function createCaptureModel(env: Env = process.env): CaptureModel | null 
   switch (provider) {
     case "anthropic":
       return createAnthropicModel(env);
+    case "gemini":
+      return createGeminiModel(env);
     case "openai-compatible":
       return createOpenAICompatibleModel(env);
     case "none":
@@ -30,6 +33,7 @@ export function createCaptureModel(env: Env = process.env): CaptureModel | null 
     case "":
       // Unset: use whatever is configured, Anthropic first for backwards compatibility.
       if (env.ANTHROPIC_API_KEY) return createAnthropicModel(env);
+      if (env.GEMINI_API_KEY) return createGeminiModel(env);
       if (env.AI_BASE_URL && env.AI_MODEL) return createOpenAICompatibleModel(env);
       return null;
     default:

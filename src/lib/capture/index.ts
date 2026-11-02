@@ -7,6 +7,7 @@ export {
   type ModelRequest,
   type ModelSegment,
 } from "./llm";
+export { createGeminiModel, GEMINI_DEFAULT_MODEL } from "./gemini";
 export { normalize } from "./normalize";
 export { createCaptureModel, createOpenAICompatibleModel } from "./providers";
 export type * from "./types";
