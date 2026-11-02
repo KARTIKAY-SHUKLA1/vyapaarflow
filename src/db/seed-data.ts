@@ -89,7 +89,7 @@ export type SeedRetailer = {
 // Phone numbers are fictional (90000 xxxxx range) and used only for demo OTP login.
 export const retailers: SeedRetailer[] = [
   { code: "RT-1001", shopName: "Sharma Kirana Store", ownerName: "Ramesh Sharma", area: "Wright Town", phone: "919000000001", salesman: "S1", creditLimitPaise: 15000000, outstandingPaise: 4250000, ordersPerWeek: 2, daysSinceLastOrder: 3 },
-  { code: "RT-1002", shopName: "Gupta General Stores", ownerName: "Sunita Gupta", area: "Napier Town", phone: "919000000002", salesman: "S1", creditLimitPaise: 10000000, outstandingPaise: 9650000, ordersPerWeek: 1.5, daysSinceLastOrder: 5 },
+  { code: "RT-1002", shopName: "Gupta General Stores", ownerName: "Sunita Gupta", area: "Napier Town", phone: "919000000002", salesman: "S1", creditLimitPaise: 10000000, outstandingPaise: 9650000, ordersPerWeek: 1.5, daysSinceLastOrder: 1 },
   { code: "RT-1003", shopName: "Patel Provision", ownerName: "Mahesh Patel", area: "Adhartal", phone: "919000000003", salesman: "S1", creditLimitPaise: 8000000, outstandingPaise: 1200000, ordersPerWeek: 1, daysSinceLastOrder: 18 },
   { code: "RT-1004", shopName: "Jain Traders", ownerName: "Anil Jain", area: "Sadar", phone: "919000000004", salesman: "S1", creditLimitPaise: 25000000, outstandingPaise: 11000000, ordersPerWeek: 3, daysSinceLastOrder: 1 },
   { code: "RT-1005", shopName: "Maa Durga Kirana", ownerName: "Pooja Yadav", area: "Ranjhi", phone: "919000000005", salesman: "S1", creditLimitPaise: 5000000, outstandingPaise: 0, ordersPerWeek: 1, daysSinceLastOrder: 9 },
@@ -101,6 +101,19 @@ export const retailers: SeedRetailer[] = [
   { code: "RT-1011", shopName: "Saraswati Stores", ownerName: "Meena Dubey", area: "Gwarighat", phone: "919000000011", salesman: "S2", creditLimitPaise: 4000000, outstandingPaise: 600000, ordersPerWeek: 0, daysSinceLastOrder: 40 },
   { code: "RT-1012", shopName: "New Bharat Kirana", ownerName: "Sanjay Chouksey", area: "Kanchghar", phone: "919000000012", salesman: "S2", creditLimitPaise: 9000000, outstandingPaise: 4400000, ordersPerWeek: 1.5, daysSinceLastOrder: 4 },
 ];
+
+/**
+ * Usual SKUs for some shops, so order history (which the AI capture uses as a
+ * tie-breaker) looks like real repeat buying. Others get a deterministic mix.
+ */
+export const favouriteSkus: Record<string, string[]> = {
+  "RT-1001": ["SKU-BS-075", "SKU-DT-1KG", "SKU-TE-250", "SKU-NM-150", "SKU-DB-250", "SKU-ND-070"],
+  "RT-1002": ["SKU-BS-200", "SKU-MR-100", "SKU-DT-500", "SKU-SP-100", "SKU-TE-100"],
+  "RT-1004": ["SKU-BS-075", "SKU-NM-400", "SKU-TE-500", "SKU-DT-4KG", "SKU-DW-500", "SKU-RK-200"],
+  "RT-1007": ["SKU-ND-070", "SKU-DT-500", "SKU-SP-100", "SKU-BS-075", "SKU-MX-200"],
+  "RT-1009": ["SKU-BS-075", "SKU-DT-1KG", "SKU-DW-500", "SKU-TD-250", "SKU-TE-500", "SKU-NM-400"],
+  "RT-1012": ["SKU-BC-075", "SKU-RK-200", "SKU-BS-075", "SKU-TE-250", "SKU-DB-250"],
+};
 
 export const staff = [
   { key: "D1", name: "Neha Soni", role: "desk", phone: "919000000100" },

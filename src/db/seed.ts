@@ -1,6 +1,7 @@
 import type { DB } from "./index";
 import * as s from "./schema";
 import * as data from "./seed-data";
+import { seedHistory } from "./seed-history";
 
 /** Wipes and re-seeds master data. Safe to run repeatedly. */
 export async function seed(db: DB, now = new Date()) {
@@ -72,6 +73,7 @@ export async function seed(db: DB, now = new Date()) {
   }
 
   const retailerIds = new Map<string, string>();
+  const retailerUserIds = new Map<string, string>();
   for (const r of data.retailers) {
     const [row] = await db
       .insert(s.retailers)
@@ -87,7 +89,11 @@ export async function seed(db: DB, now = new Date()) {
       })
       .returning({ id: s.retailers.id });
     retailerIds.set(r.phone, row.id);
-    await db.insert(s.users).values({ phone: r.phone, name: r.ownerName, role: "retailer", retailerId: row.id });
+    const [u] = await db
+      .insert(s.users)
+      .values({ phone: r.phone, name: r.ownerName, role: "retailer", retailerId: row.id })
+      .returning({ id: s.users.id });
+    retailerUserIds.set(r.phone, u.id);
   }
 
   for (const m of data.messages) {
@@ -100,5 +106,7 @@ export async function seed(db: DB, now = new Date()) {
     });
   }
 
-  return { brandIds, skuIds, staffIds, retailerIds };
+  const history = await seedHistory(db, { retailerIds, retailerUserIds, staffIds }, now);
+
+  return { brandIds, skuIds, staffIds, retailerIds, retailerUserIds, history };
 }

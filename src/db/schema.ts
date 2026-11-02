@@ -137,6 +137,10 @@ export const orders = sqliteTable(
     gstPaise: integer("gst_paise").notNull(),
     totalPaise: integer("total_paise").notNull(),
     captureId: text("capture_id"),
+    /** Client-generated per checkout attempt; makes double-submits return the same order. */
+    idempotencyKey: text("idempotency_key"),
+    /** Value of open orders + outstanding at placement, for the desk's credit decision. */
+    creditExposurePaise: integer("credit_exposure_paise"),
     note: text("note"),
     holdReason: text("hold_reason"),
     createdById: text("created_by_id")
@@ -150,6 +154,7 @@ export const orders = sqliteTable(
   (t) => [
     index("orders_retailer_idx").on(t.retailerId, t.createdAt),
     index("orders_status_idx").on(t.status),
+    uniqueIndex("orders_idempotency_uq").on(t.retailerId, t.idempotencyKey),
   ],
 );
 
