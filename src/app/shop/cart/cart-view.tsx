@@ -6,6 +6,7 @@ import { ProductImage } from "@/components/product-image";
 import { Badge, Button, ButtonLink, cx, EmptyState, Notice, PageHeader, Skeleton } from "@/components/ui";
 import { fill, type Lang, type Messages } from "@/lib/i18n/messages";
 import { formatBp, formatPaise } from "@/lib/money";
+import { describeScheme } from "@/lib/pricing/describe";
 import type { PricedCartLine } from "@/server/pricing";
 import { useCart } from "../cart-store";
 import { sizeLabel } from "../labels";
@@ -160,7 +161,7 @@ function CartRow({ line, t, lang, common }: { line: PricedCartLine; t: T; lang: 
 
           <div className="mt-2 flex flex-wrap gap-1.5">
             {line.freeCases > 0 && <Badge tone="scheme">{fill(t.free, { n: line.freeCases })}</Badge>}
-            {line.appliedScheme && <Badge tone="scheme">{fill(t.schemeApplied, { label: line.appliedScheme.label })}</Badge>}
+            {line.appliedScheme && <Badge tone="scheme">{fill(t.schemeApplied, { label: line.item.scheme ? describeScheme(line.item.scheme, lang) : line.appliedScheme.label })}</Badge>}
           </div>
 
           {line.nudge && (

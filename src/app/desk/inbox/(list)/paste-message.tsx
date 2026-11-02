@@ -3,7 +3,7 @@
 import { useActionState } from "react";
 import { Button, Card } from "@/components/ui";
 import type { Messages } from "@/lib/i18n/messages";
-import { pasteMessageAction, type PasteState } from "../actions";
+import { pasteMessageAction, type PasteState } from "../../actions";
 
 type Shop = { id: string; code: string; shopName: string; area: string };
 

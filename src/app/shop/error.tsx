@@ -7,11 +7,11 @@ export default function ShopError({ reset }: { error: Error & { digest?: string 
   return (
     <div className="mx-auto max-w-md py-12 text-center">
       <h1 className="text-xl font-semibold">Something went wrong · कुछ गड़बड़ हुई</h1>
-      <p className="mt-2 text-[15px] text-ink-2">We could not load this page. Your cart is saved on this phone.</p>
+      <p className="mt-2 text-[15px] text-ink-2">We could not load this page. Your cart is saved on this phone. · आपका कार्ट इस फ़ोन में सुरक्षित है।</p>
       <div className="mt-6 flex justify-center gap-3">
         <Button onClick={reset}>Try again · फिर से</Button>
         <ButtonLink href="/shop" variant="secondary">
-          Catalogue
+          Catalogue · कैटलॉग
         </ButtonLink>
       </div>
     </div>

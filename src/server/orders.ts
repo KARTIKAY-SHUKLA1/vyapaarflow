@@ -1,7 +1,7 @@
 import { and, desc, eq, gte, like, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { DB } from "@/db";
-import { auditLog, orderLines, orders, retailers, skus, stock, type OrderSource, type OrderStatus } from "@/db/schema";
+import { auditLog, orderLines, orders, retailers, schemes, skus, stock, type OrderSource, type OrderStatus } from "@/db/schema";
 import { canAccessRetailer, type Viewer } from "@/lib/auth/policy";
 import { formatPaise } from "@/lib/money";
 import { isoDateIST } from "@/lib/pricing";
@@ -248,11 +248,26 @@ export async function getOrderForViewer(db: DB, viewer: Viewer, orderId: string)
     .select({
       line: orderLines,
       sku: { id: skus.id, code: skus.code, name: skus.name, nameHi: skus.nameHi, imageKey: skus.imageKey, category: skus.category },
+      // The rule as it was applied, so the scheme can be described in either language.
+      scheme: { type: schemes.type, buyQty: schemes.buyQty, freeQty: schemes.freeQty, minQty: schemes.minQty, percentBp: schemes.percentBp },
     })
     .from(orderLines)
     .innerJoin(skus, eq(skus.id, orderLines.skuId))
+    .leftJoin(schemes, eq(schemes.id, orderLines.schemeId))
     .where(eq(orderLines.orderId, orderId))
     .orderBy(skus.name);
 
-  return { ...row.order, retailer: row.retailer, lines: lines.map((l) => ({ ...l.line, sku: l.sku })) };
+  return {
+    ...row.order,
+    retailer: row.retailer,
+    lines: lines.map((l) => ({ ...l.line, sku: l.sku, scheme: l.scheme?.type ? schemeRule(l.scheme) : null })),
+  };
+}
+
+type SchemeRow = { type: "FREE_GOODS" | "SLAB_PERCENT" | null; buyQty: number | null; freeQty: number | null; minQty: number | null; percentBp: number | null };
+
+function schemeRule(r: SchemeRow) {
+  return r.type === "FREE_GOODS"
+    ? ({ type: "FREE_GOODS", buyQty: r.buyQty ?? 0, freeQty: r.freeQty ?? 0 } as const)
+    : ({ type: "SLAB_PERCENT", minQty: r.minQty ?? 0, percentBp: r.percentBp ?? 0 } as const);
 }

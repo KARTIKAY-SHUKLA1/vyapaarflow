@@ -11,6 +11,7 @@ import type { captureLines, captures, inboundMessages } from "@/db/schema";
 import { formatDateTime } from "@/lib/dates";
 import { fill, type Lang, type Messages } from "@/lib/i18n/messages";
 import { formatBp, formatPaise } from "@/lib/money";
+import { describeScheme } from "@/lib/pricing/describe";
 import { formatIndianMobile } from "@/lib/phone";
 import { uuid } from "@/lib/uuid";
 import type { PricedCartLine } from "@/server/pricing";
@@ -256,6 +257,7 @@ export function Review({ lang, d, shopT, message, capture, lines, catalogue, ord
                 editable={!!editable}
                 d={d}
                 shopT={shopT}
+                lang={lang}
               />
             ))}
           </ol>
@@ -320,6 +322,7 @@ function ReviewLine({
   editable,
   d,
   shopT,
+  lang,
 }: {
   line: Line;
   decision: Decision;
@@ -331,6 +334,7 @@ function ReviewLine({
   editable: boolean;
   d: D;
   shopT: Messages["shop"];
+  lang: Lang;
 }) {
   const b = band(line.confidence);
   const sku = decision.skuId ? skuById.get(decision.skuId) : undefined;
@@ -481,7 +485,7 @@ function ReviewLine({
         <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-md bg-sunken px-3 py-2 text-[14px]">
           <span className="num text-ink-2">
             {fill(d.linePricing, { price: formatPaise(priced.casePricePaise) })} · GST {formatBp(priced.gstRateBp)}
-            {priced.appliedScheme && <span className="text-scheme"> · {priced.appliedScheme.label}</span>}
+            {priced.appliedScheme && <span className="text-scheme"> · {priced.item.scheme ? describeScheme(priced.item.scheme, lang) : priced.appliedScheme.label}</span>}
             {priced.freeCases > 0 && <span className="text-scheme"> · +{priced.freeCases}</span>}
           </span>
           <span className="num font-semibold">{formatPaise(priced.totalPaise)}</span>

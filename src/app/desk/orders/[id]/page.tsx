@@ -9,6 +9,7 @@ import { formatDateTime } from "@/lib/dates";
 import { fill } from "@/lib/i18n/messages";
 import { getMessages } from "@/lib/i18n/server";
 import { formatBp, formatPaise } from "@/lib/money";
+import { describeScheme } from "@/lib/pricing";
 import { loadCredit } from "@/server/catalogue";
 import { orderAudit } from "@/server/desk";
 import { getOrderForViewer } from "@/server/orders";
@@ -18,15 +19,6 @@ import { OrderActions } from "./order-actions";
 
 export const metadata: Metadata = { title: "Order" };
 
-const ACTION_LABEL: Record<string, string> = {
-  "order.placed": "Placed",
-  "order.placed_on_credit_hold": "Placed — over credit limit, held",
-  "order.approved": "Approved",
-  "order.credit_released": "Credit approved and released",
-  "order.cancelled": "Cancelled",
-  "order.exported_to_tally": "Exported to Tally",
-  "capture.confirmed": "Created from AI capture (desk confirmed)",
-};
 
 export default async function DeskOrder({ params, searchParams }: PageProps<"/desk/orders/[id]">) {
   const [{ id }, sp] = await Promise.all([params, searchParams]);
@@ -75,7 +67,7 @@ export default async function DeskOrder({ params, searchParams }: PageProps<"/de
                     </p>
                     {(l.freeCases > 0 || l.discountPaise > 0) && (
                       <p className="text-[13px] text-scheme">
-                        {l.schemeNote}
+                        {l.scheme ? describeScheme(l.scheme, lang) : l.schemeNote}
                         {l.freeCases > 0 && ` · ${fill(t.shop.free, { n: l.freeCases })}`}
                         {l.discountPaise > 0 && ` · −${formatPaise(l.discountPaise)}`}
                       </p>
@@ -106,7 +98,7 @@ export default async function DeskOrder({ params, searchParams }: PageProps<"/de
               {audit.map((a) => (
                 <li key={a.id} className="text-[14px]">
                   <p>
-                    <span className="font-medium">{ACTION_LABEL[a.action] ?? a.action}</span>
+                    <span className="font-medium">{(d.audit as Record<string, string>)[a.action] ?? a.action}</span>
                     <span className="text-ink-3"> · {a.actor ?? "—"} · {formatDateTime(a.at, lang)}</span>
                   </p>
                   {a.data && typeof a.data.reason === "string" && <p className="text-ink-2">“{a.data.reason}”</p>}

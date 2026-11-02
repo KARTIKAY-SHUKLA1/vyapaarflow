@@ -8,7 +8,7 @@ import { fill } from "@/lib/i18n/messages";
 import { getMessages } from "@/lib/i18n/server";
 import { formatPaise } from "@/lib/money";
 import { listOrdersForRetailer } from "@/server/orders";
-import { StatusBadge } from "../labels";
+import { StatusBadge } from "../../labels";
 
 export const metadata: Metadata = { title: "My orders" };
 

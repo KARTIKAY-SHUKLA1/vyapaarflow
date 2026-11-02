@@ -7,7 +7,7 @@ import { formatDateTime } from "@/lib/dates";
 import { getMessages } from "@/lib/i18n/server";
 import { formatPaise } from "@/lib/money";
 import { listDeskOrders, QUEUE_FILTERS, type QueueFilter } from "@/server/desk";
-import { DeskStatusBadge } from "../labels";
+import { DeskStatusBadge } from "../../labels";
 
 export const metadata: Metadata = { title: "Orders" };
 

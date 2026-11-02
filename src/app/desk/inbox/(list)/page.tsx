@@ -10,7 +10,7 @@ import { formatDateTime } from "@/lib/dates";
 import { getMessages } from "@/lib/i18n/server";
 import { formatIndianMobile } from "@/lib/phone";
 import { INBOX_FILTERS, listInbox, type InboxFilter } from "@/server/capture";
-import { runCaptureAction } from "../actions";
+import { runCaptureAction } from "../../actions";
 import { PasteMessage } from "./paste-message";
 
 export const metadata: Metadata = { title: "AI inbox" };

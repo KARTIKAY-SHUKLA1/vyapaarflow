@@ -4,10 +4,10 @@ import { db } from "@/db";
 import { orderLines, orders } from "@/db/schema";
 import { requireViewer } from "@/lib/auth/dal";
 import { getMessages } from "@/lib/i18n/server";
-import { isoDateIST } from "@/lib/pricing";
+import { describeScheme, isoDateIST } from "@/lib/pricing";
 import { loadCatalogue, loadCredit, loadRetailer } from "@/server/catalogue";
 import { Catalogue, type CatalogueCard } from "./catalogue";
-import { sizeLabel } from "./labels";
+import { sizeLabel } from "../labels";
 
 export const metadata: Metadata = { title: "Catalogue" };
 
@@ -45,7 +45,7 @@ export default async function CataloguePage() {
     pricePerPiecePaise: i.pricePerPiecePaise,
     stockCases: i.stockCases,
     stockStatus: i.stockStatus,
-    scheme: i.scheme?.label ?? null,
+    scheme: i.scheme ? describeScheme(i.scheme, lang) : null,
   }));
 
   return (

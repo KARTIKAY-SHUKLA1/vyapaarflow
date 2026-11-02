@@ -25,8 +25,8 @@ export type CatalogueItem = {
   casePricePaise: number; // excl. GST
   stockCases: number;
   stockStatus: StockStatus;
-  /** The one scheme in force today, or null (none, or a misconfigured overlap). */
-  scheme: { id: string; type: SchemeRule["type"]; label: string } | null;
+  /** The one scheme in force today, or null (none, or a misconfigured overlap). Full rule, so text can be bilingual. */
+  scheme: SchemeRule | null;
   schemes: SchemeRule[]; // all rows, for the pricing engine
 };
 
@@ -83,7 +83,7 @@ export async function loadCatalogue(db: DB, priceTier: string, asOf: string, sku
       casePricePaise: price * sku.packSize,
       stockCases,
       stockStatus: stockStatus(stockCases),
-      scheme: inForce.length === 1 ? { id: inForce[0].id, type: inForce[0].type, label: inForce[0].label } : null,
+      scheme: inForce.length === 1 ? inForce[0] : null,
       schemes: rules,
     };
   });

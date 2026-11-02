@@ -6,7 +6,7 @@ import { useState, useTransition } from "react";
 import { Button, Card, EmptyState, Notice } from "@/components/ui";
 import { fill, type Messages } from "@/lib/i18n/messages";
 import { formatPaise } from "@/lib/money";
-import { exportAction } from "../actions";
+import { exportAction } from "../../actions";
 
 type Row = { id: string; number: string; shopName: string; retailerCode: string; totalPaise: number; createdLabel: string; sourceLabel: string };
 

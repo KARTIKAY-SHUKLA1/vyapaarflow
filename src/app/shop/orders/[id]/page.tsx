@@ -9,6 +9,7 @@ import { formatDateTime } from "@/lib/dates";
 import { fill } from "@/lib/i18n/messages";
 import { getMessages } from "@/lib/i18n/server";
 import { formatBp, formatPaise } from "@/lib/money";
+import { describeScheme } from "@/lib/pricing";
 import { getOrderForViewer } from "@/server/orders";
 import { sizeLabel, StatusBadge } from "../../labels";
 import { OrderAgainButton } from "./order-again";
@@ -72,7 +73,7 @@ export default async function OrderPage({ params, searchParams }: PageProps<"/sh
                   </p>
                   {(l.freeCases > 0 || l.discountPaise > 0) && (
                     <p className="text-[13px] text-scheme">
-                      {l.schemeNote}
+                      {l.scheme ? describeScheme(l.scheme, lang) : l.schemeNote}
                       {l.freeCases > 0 && ` · ${fill(t.shop.free, { n: l.freeCases })}`}
                       {l.discountPaise > 0 && ` · −${formatPaise(l.discountPaise)}`}
                     </p>

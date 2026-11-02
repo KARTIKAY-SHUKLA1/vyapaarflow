@@ -8,7 +8,7 @@ import { requireViewer } from "@/lib/auth/dal";
 import { fill } from "@/lib/i18n/messages";
 import { getMessages } from "@/lib/i18n/server";
 import { formatBp, formatPaise } from "@/lib/money";
-import { isoDateIST } from "@/lib/pricing";
+import { describeScheme, isoDateIST } from "@/lib/pricing";
 import { loadCatalogue, loadRetailer } from "@/server/catalogue";
 import { categoryLabel, sizeLabel as sizeOf, StockBadge } from "../../labels";
 import { QuantityPicker } from "./quantity-picker";
@@ -42,7 +42,7 @@ export default async function ProductPage({ params }: PageProps<"/shop/p/[code]"
           <h1 className="mt-1 text-[24px] leading-tight font-semibold tracking-tight">{name}</h1>
           <div className="mt-2 flex flex-wrap gap-1.5">
             <StockBadge t={t.shop} status={item.stockStatus} cases={item.stockCases} />
-            {item.scheme && <Badge tone="scheme">{item.scheme.label}</Badge>}
+            {item.scheme && <Badge tone="scheme">{describeScheme(item.scheme, lang)}</Badge>}
           </div>
 
           <p className="mt-4">
@@ -60,7 +60,7 @@ export default async function ProductPage({ params }: PageProps<"/shop/p/[code]"
 
           <Card className="mt-5 p-4">
             <h2 className="text-[15px] font-semibold">{t.shop.schemeTitle}</h2>
-            <p className="mt-1 text-[15px] text-ink-2">{item.scheme ? item.scheme.label : t.shop.noScheme}</p>
+            <p className="mt-1 text-[15px] text-ink-2">{item.scheme ? describeScheme(item.scheme, lang) : t.shop.noScheme}</p>
           </Card>
 
           <div className="mt-5">

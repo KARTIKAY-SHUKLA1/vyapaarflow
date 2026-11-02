@@ -8,9 +8,9 @@ import { Badge, Button, cx, EmptyState } from "@/components/ui";
 import { fill, type Messages } from "@/lib/i18n/messages";
 import { formatPaise } from "@/lib/money";
 import type { StockStatus } from "@/server/catalogue";
-import { categoryLabel, StockBadge } from "./labels";
-import { useCart, type CartLine } from "./cart-store";
-import { Stepper } from "./stepper";
+import { categoryLabel, StockBadge } from "../labels";
+import { useCart, type CartLine } from "../cart-store";
+import { Stepper } from "../stepper";
 
 export type CatalogueCard = {
   id: string;
