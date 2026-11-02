@@ -18,6 +18,7 @@ import type { PricedCartLine } from "@/server/pricing";
 import { sizeLabel } from "../../../shop/labels";
 import { confirmCaptureAction, dismissAction, linkAndRerunAction, priceForDeskAction, runCaptureAction } from "../../actions";
 import { engineNotice } from "../../engine-notice";
+import { Icon } from "@/components/icons";
 
 type D = Messages["desk"];
 type Line = typeof captureLines.$inferSelect;
@@ -78,6 +79,16 @@ export function Review({ lang, d, shopT, message, capture, lines, catalogue, ord
     return x.include && (!x.skuId || !x.quantity || x.unit !== "case");
   });
   const includedCount = lines.filter((l) => decisions[l.id].include).length;
+  // Review summary: which lines are ready, which need the desk, which are left out.
+  const lineState = (l: Line): "ready" | "attention" | "excluded" => {
+    const x = decisions[l.id];
+    if (!x.include) return "excluded";
+    const p = x.skuId ? priced.get(x.skuId) : undefined;
+    return !x.skuId || !x.quantity || x.unit !== "case" || flagged.includes(l.id) || (p && !p.orderable) ? "attention" : "ready";
+  };
+  const states = lines.map((l) => ({ id: l.id, state: lineState(l) }));
+  const attentionIds = states.filter((x) => x.state === "attention").map((x) => x.id);
+  const showFirstAttention = () => attentionIds[0] && document.getElementById(`review-line-${attentionIds[0]}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
   const canConfirm = editable && !!retailerId && checked && unresolved.length === 0 && includedCount > 0 && !!pricing?.orderable && !loading && !pending;
 
   const set = (id: string, patch: Partial<Decision>) => {
@@ -247,6 +258,18 @@ export function Review({ lang, d, shopT, message, capture, lines, catalogue, ord
         ) : lines.length === 0 ? (
           <EmptyState icon="inbox" title={d.noLines} />
         ) : (
+          <>
+          <div className="flex flex-wrap items-center gap-2 rounded-lg border border-line bg-surface px-4 py-3 text-[14px]" aria-live="polite">
+            <span className="font-semibold">{fill(d.sumLines, { n: lines.length })}</span>
+            <Badge tone="accent">{fill(d.sumReady, { n: states.filter((x) => x.state === "ready").length })}</Badge>
+            {attentionIds.length > 0 && <Badge tone="warn">{fill(d.sumAttention, { n: attentionIds.length })}</Badge>}
+            {states.some((x) => x.state === "excluded") && <Badge tone="neutral">{fill(d.sumExcluded, { n: states.filter((x) => x.state === "excluded").length })}</Badge>}
+            {attentionIds.length > 0 && (
+              <button type="button" onClick={showFirstAttention} className="ml-auto h-9 rounded-md border border-warn/40 px-3 font-medium text-warn hover:bg-warn-soft">
+                {d.showLine}
+              </button>
+            )}
+          </div>
           <ol className="space-y-3">
             {lines.map((l) => (
               <ReviewLine
@@ -257,18 +280,19 @@ export function Review({ lang, d, shopT, message, capture, lines, catalogue, ord
                 priced={decisions[l.id].skuId ? priced.get(decisions[l.id].skuId!) : undefined}
                 catalogue={catalogue}
                 skuById={skuById}
-                flagged={flagged.includes(l.id)}
                 editable={!!editable}
                 d={d}
                 shopT={shopT}
                 lang={lang}
+                state={lineState(l)}
               />
             ))}
           </ol>
+          </>
         )}
 
         {editable && lines.length > 0 && (
-          <Card className="space-y-3 p-4">
+          <Card className="sticky z-10 space-y-3 p-4 shadow-pop" style={{ bottom: "calc(0.5rem + env(safe-area-inset-bottom, 0px))" }}>
             {problem && <Notice tone="danger">{problem}</Notice>}
             {error && (
               <Notice tone="danger">
@@ -286,11 +310,11 @@ export function Review({ lang, d, shopT, message, capture, lines, catalogue, ord
               cart.length > 0 && <Skeleton className="h-32 w-full" />
             ) : (
               <dl className={cx("space-y-1 text-[15px] transition-opacity", loading && "opacity-60")} aria-busy={loading}>
-                <Row label={shopT.gross} value={formatPaise(pricing.totals.grossPaise)} />
-                {pricing.totals.discountPaise > 0 && <Row label={shopT.discount} value={`− ${formatPaise(pricing.totals.discountPaise)}`} className="text-scheme" />}
+                <Row label={shopT.gross} value={formatPaise(pricing.totals.grossPaise)} className="hidden sm:flex" />
+                {pricing.totals.discountPaise > 0 && <Row label={shopT.discount} value={`− ${formatPaise(pricing.totals.discountPaise)}`} className="hidden text-scheme sm:flex" />}
                 {pricing.totals.freeCases > 0 && <Row label={shopT.freeCases} value={String(pricing.totals.freeCases)} className="text-scheme" />}
-                <Row label={shopT.gst} value={`+ ${formatPaise(pricing.totals.gstPaise)}`} />
-                <Row label={shopT.total} value={formatPaise(pricing.totals.totalPaise)} className="border-t border-line pt-1.5 text-[17px] font-semibold" />
+                <Row label={shopT.gst} value={`+ ${formatPaise(pricing.totals.gstPaise)}`} className="hidden sm:flex" />
+                <Row label={shopT.total} value={formatPaise(pricing.totals.totalPaise)} className="hidden text-[17px] font-semibold sm:flex sm:border-t sm:border-line sm:pt-1.5" />
               </dl>
             )}
             {pricing?.credit.wouldExceed && (
@@ -300,7 +324,7 @@ export function Review({ lang, d, shopT, message, capture, lines, catalogue, ord
             )}
             {unresolved.length > 0 && <p className="text-[14px] font-medium text-warn">{d.errUnresolved}</p>}
 
-            <label className="flex items-start gap-3 rounded-md bg-sunken p-3 text-[15px]">
+            <label className="flex items-start gap-3 rounded-md bg-sunken px-3 py-2.5 text-[15px]">
               <input type="checkbox" checked={checked} onChange={(e) => setChecked(e.target.checked)} className="mt-1 h-5 w-5 accent-[var(--color-accent)]" />
               <span>{d.confirmCheck}</span>
             </label>
@@ -322,11 +346,11 @@ function ReviewLine({
   priced,
   catalogue,
   skuById,
-  flagged,
   editable,
   d,
   shopT,
   lang,
+  state,
 }: {
   line: Line;
   decision: Decision;
@@ -334,51 +358,64 @@ function ReviewLine({
   priced?: PricedCartLine;
   catalogue: Sku[];
   skuById: Map<string, Sku>;
-  flagged: boolean;
   editable: boolean;
   d: D;
   shopT: Messages["shop"];
   lang: Lang;
+  state: "ready" | "attention" | "excluded";
 }) {
   const b = band(line.confidence);
   const sku = decision.skuId ? skuById.get(decision.skuId) : undefined;
   // Mirrors the server: a changed product or a unit settled to cases becomes an alias for this shop.
   const corrected = decision.include && !!decision.skuId && (decision.skuId !== line.skuId || (line.unit !== "case" && decision.unit === "case"));
-  const needs = decision.include && (!decision.skuId || !decision.quantity || decision.unit !== "case");
   const suggestions = [line.skuId, line.alt1SkuId, line.alt2SkuId].filter((x): x is string => !!x && skuById.has(x));
   const categories = [...new Set(catalogue.map((c) => c.category))];
   const issues = (line.issues ?? []) as (keyof D["issues"])[];
 
   return (
     <li
+      id={`review-line-${line.id}`}
       className={cx(
-        "rounded-lg border bg-surface p-4 shadow-card",
-        !decision.include ? "border-line opacity-70" : flagged || needs ? "border-warn/60" : "border-line",
+        "scroll-mt-32 rounded-lg border border-l-4 bg-surface p-4 shadow-card",
+        state === "excluded" ? "border-line border-l-line-strong opacity-70" : state === "attention" ? "border-warn/50 border-l-warn" : "border-line border-l-accent",
       )}
     >
-      <div className="flex flex-wrap items-start justify-between gap-2">
+      <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="text-[13px] font-medium text-ink-3">{d.words}</p>
           <p className="text-[17px] font-semibold">“{line.originalText}”</p>
         </div>
-        <div className="flex flex-wrap items-center gap-1.5">
-          <Badge tone={b === "high" ? "accent" : b === "medium" ? "warn" : "danger"}>
+        <Badge tone={state === "ready" ? "accent" : state === "attention" ? "warn" : "neutral"} className="shrink-0">
+          {state === "ready" ? d.lineReady : state === "attention" ? d.needsDecision : d.excluded}
+        </Badge>
+      </div>
+
+      {/* How sure the AI (or rule matcher) was, and where the match came from. */}
+      <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px]">
+        <span className="flex items-center gap-2">
+          <span className="text-ink-3">{d.confidenceLabel}</span>
+          <span className="h-1.5 w-16 overflow-hidden rounded-full bg-sunken" aria-hidden>
+            <span className={cx("block h-full rounded-full", b === "high" ? "bg-accent" : b === "medium" ? "bg-warn" : "bg-danger")} style={{ width: `${line.confidence}%` }} />
+          </span>
+          <span className={cx("num font-semibold", b === "high" ? "text-accent" : b === "medium" ? "text-warn" : "text-danger")}>
             {d.confidence[b]} · {line.confidence}%
-          </Badge>
-          <Badge tone="neutral">{(d.matchedBy as Record<string, string>)[line.matchedBy] ?? line.matchedBy}</Badge>
-        </div>
+          </span>
+        </span>
+        <span className="text-ink-3">{fill(d.matchedVia, { how: (d.matchedBy as Record<string, string>)[line.matchedBy] ?? line.matchedBy })}</span>
       </div>
 
       {issues.length > 0 && (
-        <ul className="mt-2 space-y-0.5">
-          {issues.map((i) => (
-            <li key={i} className="text-[14px] text-warn">
-              • {d.issues[i] ?? i}
-            </li>
-          ))}
-        </ul>
+        <div role="note" className="mt-3 flex gap-2 rounded-md bg-warn-soft px-3 py-2 text-[14px] text-warn">
+          <Icon name="alert" size={18} className="mt-0.5 shrink-0" />
+          <ul className="space-y-0.5">
+            {issues.map((i) => (
+              <li key={i}>{d.issues[i] ?? i}</li>
+            ))}
+          </ul>
+        </div>
       )}
 
+      {sku && decision.include && <p className="mt-3 text-[15px] leading-snug font-semibold sm:hidden">{sku.name}</p>}
       <div className="mt-3 flex gap-3">
         {sku && <ProductImage imageKey={sku.imageKey} label={sizeLabel(sku.name)} size="sm" alt="" />}
         <div className="grid min-w-0 flex-1 gap-3 sm:grid-cols-[minmax(0,1fr)_7rem]">
@@ -506,8 +543,6 @@ function ReviewLine({
       )}
 
       <div className="mt-2 flex flex-wrap gap-2">
-        {!decision.include && <Badge tone="neutral">{d.excluded}</Badge>}
-        {needs && <Badge tone="warn">{d.needsDecision}</Badge>}
         {corrected && <Badge tone="info">{d.corrected}</Badge>}
       </div>
     </li>

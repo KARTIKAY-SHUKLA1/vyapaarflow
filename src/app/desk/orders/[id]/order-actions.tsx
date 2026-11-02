@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
+import { Icon } from "@/components/icons";
 import { Button, Card, Notice } from "@/components/ui";
 import type { OrderStatus } from "@/db/schema";
 import { fill, type Messages } from "@/lib/i18n/messages";
@@ -40,6 +41,7 @@ export function OrderActions({ orderId, status, d }: { orderId: string; status: 
 
   return (
     <Card className="space-y-3 p-4">
+      <h2 className="text-[15px] font-semibold">{d.decision}</h2>
       {message && <Notice tone={message.tone}>{message.text}</Notice>}
 
       {mode ? (
@@ -50,6 +52,10 @@ export function OrderActions({ orderId, status, d }: { orderId: string; status: 
           }}
           className="space-y-3"
         >
+          <p className={`flex gap-2 rounded-md px-3 py-2 text-[14px] ${mode === "cancel" ? "bg-danger-soft text-danger" : "bg-warn-soft text-warn"}`}>
+            <Icon name="alert" size={18} className="mt-0.5 shrink-0" />
+            {mode === "cancel" ? d.cancelWarning : d.releaseWarning}
+          </p>
           <label className="block">
             <span className="mb-1.5 block text-[14px] font-medium">{d.reasonLabel}</span>
             <textarea
@@ -74,16 +80,23 @@ export function OrderActions({ orderId, status, d }: { orderId: string; status: 
           </div>
         </form>
       ) : (
-        <div className="flex flex-wrap gap-2">
+        <div className="space-y-3">
           {status === "placed" && (
-            <Button onClick={() => run({ action: "approve" })} disabled={pending}>
+            <Button size="lg" onClick={() => run({ action: "approve" })} disabled={pending}>
               {pending ? d.working : d.approve}
             </Button>
           )}
-          {status === "credit_hold" && <Button onClick={() => setMode("release")}>{d.release}</Button>}
-          <Button variant="danger" onClick={() => setMode("cancel")} disabled={pending}>
-            {d.cancelOrder}
-          </Button>
+          {status === "credit_hold" && (
+            <Button size="lg" onClick={() => setMode("release")}>
+              {d.release}
+            </Button>
+          )}
+          {/* Destructive action kept apart from the main decision. */}
+          <div className="border-t border-line pt-3">
+            <Button variant="danger" onClick={() => setMode("cancel")} disabled={pending}>
+              {d.cancelOrder}
+            </Button>
+          </div>
         </div>
       )}
     </Card>

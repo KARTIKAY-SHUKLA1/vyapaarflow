@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { asc } from "drizzle-orm";
+import { Icon } from "@/components/icons";
 import { SubmitButton } from "@/components/submit-button";
 import { Badge, ButtonLink, cx, EmptyState, PageHeader } from "@/components/ui";
 import { db } from "@/db";
@@ -16,6 +17,18 @@ import { PasteMessage } from "./paste-message";
 export const metadata: Metadata = { title: "AI inbox" };
 
 const STATUS_TONE = { new: "info", captured: "warn", converted: "accent", dismissed: "neutral" } as const;
+/** Left stripe colour per status, so the list can be scanned without reading badges. */
+const STRIPE = { new: "border-l-info", captured: "border-l-warn", converted: "border-l-accent", dismissed: "border-l-line-strong" } as const;
+
+/** "Sharma Kirana Store" → "SK" (shop avatar). */
+function initials(name: string): string {
+  return name
+    .split(/\s+/)
+    .filter((w) => /^[\p{L}]/u.test(w))
+    .slice(0, 2)
+    .map((w) => w[0]!.toUpperCase())
+    .join("");
+}
 
 export default async function Inbox({ searchParams }: PageProps<"/desk/inbox">) {
   const viewer = await requireViewer("desk");
@@ -23,10 +36,13 @@ export default async function Inbox({ searchParams }: PageProps<"/desk/inbox">) 
   const d = t.desk;
   const sp = await searchParams;
   const filter: InboxFilter = INBOX_FILTERS.includes(sp.filter as InboxFilter) ? (sp.filter as InboxFilter) : "todo";
-  const [messages, shops] = await Promise.all([
+  const [messages, all, shops] = await Promise.all([
     listInbox(db, viewer, filter),
+    listInbox(db, viewer, "all"),
     db.select({ id: retailers.id, code: retailers.code, shopName: retailers.shopName, area: retailers.area }).from(retailers).orderBy(asc(retailers.shopName)),
   ]);
+  const count = (f: InboxFilter) =>
+    f === "all" ? all.length : f === "todo" ? all.filter((m) => m.status === "new" || m.status === "captured").length : all.filter((m) => m.status === f).length;
 
   return (
     <>
@@ -42,7 +58,7 @@ export default async function Inbox({ searchParams }: PageProps<"/desk/inbox">) 
               f === filter ? "border-accent bg-accent text-accent-ink" : "border-line-strong bg-surface text-ink-2 hover:bg-sunken",
             )}
           >
-            {d.inboxFilters[f]}
+            {d.inboxFilters[f]} <span className={cx("num ml-1", f === filter ? "opacity-90" : "text-ink-3")}>{count(f)}</span>
           </Link>
         ))}
       </nav>
@@ -51,21 +67,34 @@ export default async function Inbox({ searchParams }: PageProps<"/desk/inbox">) 
         {messages.length === 0 ? (
           <EmptyState icon="inbox" title={d.inboxEmptyTitle} body={d.inboxEmptyBody} action={<ButtonLink href="#paste-body" variant="secondary">{d.pasteOne}</ButtonLink>} />
         ) : (
-          <ul className="space-y-3">
+          <ul className="min-w-0 space-y-3">
             {messages.map((m) => (
-              <li key={m.id} className="rounded-lg border border-line bg-surface p-4 shadow-card">
-                <div className="flex flex-wrap items-center justify-between gap-2 text-[13px] text-ink-3">
-                  <span className="flex flex-wrap items-center gap-2">
-                    <span className="text-[15px] font-semibold text-ink">{m.shopName ?? d.unknownSender}</span>
-                    {m.retailerCode && <span>{m.retailerCode}</span>}
-                    <span className="num">{formatIndianMobile(m.fromPhone)}</span>
-                    <Badge tone="neutral">{d.channel[m.channel]}</Badge>
+              <li key={m.id} className={cx("rounded-lg border border-l-4 border-line bg-surface p-4 shadow-card", STRIPE[m.status])}>
+                <div className="flex items-start gap-3">
+                  <span
+                    aria-hidden
+                    className={cx(
+                      "flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[14px] font-semibold",
+                      m.shopName ? "bg-accent-soft text-accent" : "bg-warn-soft text-warn",
+                    )}
+                  >
+                    {m.shopName ? initials(m.shopName) : <Icon name="user" size={18} />}
                   </span>
-                  <span>{formatDateTime(m.receivedAt, lang)}</span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="min-w-0 truncate text-[15px] font-semibold">{m.shopName ?? d.unknownSender}</p>
+                      <Badge tone={STATUS_TONE[m.status]} className="shrink-0">
+                        {d.inboxFilters[m.status]}
+                      </Badge>
+                    </div>
+                    <p className="num truncate text-[13px] text-ink-3">
+                      {[m.retailerCode ?? formatIndianMobile(m.fromPhone), d.channel[m.channel], formatDateTime(m.receivedAt, lang)].join(" · ")}
+                    </p>
+                  </div>
                 </div>
-                <p className="mt-2 text-[15px] leading-relaxed whitespace-pre-wrap">{m.body}</p>
-                <div className="mt-3 flex items-center justify-between gap-2">
-                  <Badge tone={STATUS_TONE[m.status]}>{d.inboxFilters[m.status]}</Badge>
+                {!m.shopName && <p className="mt-2 text-[14px] text-warn">{d.unknownSenderHint}</p>}
+                <p className="mt-2.5 rounded-md bg-sunken px-3 py-2 text-[15px] leading-relaxed whitespace-pre-wrap">{m.body}</p>
+                <div className="mt-3 flex items-center justify-end gap-2">
                   {m.status === "new" ? (
                     <form action={runCaptureAction}>
                       <input type="hidden" name="messageId" value={m.id} />

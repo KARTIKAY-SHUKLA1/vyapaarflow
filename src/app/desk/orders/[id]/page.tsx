@@ -94,6 +94,7 @@ export default async function DeskOrder({ params, searchParams }: PageProps<"/de
 
           <Card className="p-4">
             <h2 className="mb-2 text-[15px] font-semibold">{d.history}</h2>
+            {audit.length === 0 && <p className="text-[14px] text-ink-3">{d.noHistory}</p>}
             <ol className="space-y-2">
               {audit.map((a) => (
                 <li key={a.id} className="text-[14px]">
@@ -108,10 +109,26 @@ export default async function DeskOrder({ params, searchParams }: PageProps<"/de
           </Card>
         </div>
 
-        <div className="space-y-4 lg:sticky lg:top-32">
+        <div className="order-first space-y-4 lg:sticky lg:top-32 lg:order-none">
+          {order.holdReason && order.status === "credit_hold" && <Notice tone="warn" title={d.holdReason}>{order.holdReason}</Notice>}
           {credit && (
             <Card className="p-4">
               <h2 className="mb-2 text-[15px] font-semibold">{d.creditPosition}</h2>
+              {(() => {
+                const used = Math.min(100, Math.round((credit.exposurePaise / Math.max(1, credit.limitPaise)) * 100));
+                const over = Math.max(0, credit.exposurePaise - credit.limitPaise);
+                return (
+                  <div className="mb-3">
+                    <div className="h-2 overflow-hidden rounded-full bg-sunken" aria-hidden>
+                      <div className={`h-full rounded-full ${over > 0 ? "bg-warn" : "bg-accent"}`} style={{ width: `${used}%` }} />
+                    </div>
+                    <p className="num mt-1 flex justify-between gap-2 text-[13px]">
+                      <span className="text-ink-2">{fill(d.creditUsed, { used: formatPaise(credit.exposurePaise), limit: formatPaise(credit.limitPaise) })}</span>
+                      {over > 0 && <span className="font-semibold text-warn">{fill(d.overBy, { amount: formatPaise(over) })}</span>}
+                    </p>
+                  </div>
+                );
+              })()}
               <dl className="space-y-1 text-[15px]">
                 <Row label={d.creditLimit} value={formatPaise(credit.limitPaise)} />
                 <Row label={d.outstanding} value={formatPaise(credit.outstandingPaise)} />
@@ -120,7 +137,6 @@ export default async function DeskOrder({ params, searchParams }: PageProps<"/de
               </dl>
             </Card>
           )}
-          {order.holdReason && order.status === "credit_hold" && <Notice tone="warn" title={d.holdReason}>{order.holdReason}</Notice>}
           {order.cancelReason && <Notice tone="danger" title={d.cancelReason}>{order.cancelReason}</Notice>}
           <OrderActions orderId={order.id} status={order.status} d={d} />
         </div>

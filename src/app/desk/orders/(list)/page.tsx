@@ -18,7 +18,14 @@ export default async function DeskOrders({ searchParams }: PageProps<"/desk/orde
   const sp = await searchParams;
   const filter: QueueFilter = QUEUE_FILTERS.includes(sp.filter as QueueFilter) ? (sp.filter as QueueFilter) : "open";
   const q = typeof sp.q === "string" ? sp.q.slice(0, 60) : "";
-  const rows = await listDeskOrders(db, viewer, { filter, q });
+  const [rows, everything] = await Promise.all([listDeskOrders(db, viewer, { filter, q }), listDeskOrders(db, viewer, { filter: "all", limit: 1000 })]);
+  // Chip counts (read-only): how many orders each filter would show.
+  const count = (f: QueueFilter) =>
+    f === "all"
+      ? everything.length
+      : f === "open"
+        ? everything.filter((o) => o.status === "placed" || o.status === "credit_hold" || o.status === "approved").length
+        : everything.filter((o) => o.status === f).length;
   const d = t.desk;
 
   return (
@@ -36,7 +43,7 @@ export default async function DeskOrders({ searchParams }: PageProps<"/desk/orde
                 f === filter ? "border-accent bg-accent text-accent-ink" : "border-line-strong bg-surface text-ink-2 hover:bg-sunken",
               )}
             >
-              {d.filters[f]}
+              {d.filters[f]} <span className={cx("num ml-1", f === filter ? "opacity-90" : "text-ink-3")}>{count(f)}</span>
             </Link>
           ))}
         </nav>
@@ -75,6 +82,7 @@ export default async function DeskOrders({ searchParams }: PageProps<"/desk/orde
                 <p className="text-[13px] text-ink-3">
                   {formatDateTime(o.createdAt, lang)} · {fill(t.shop.itemsCases, { items: o.lineCount, cases: o.cases })} · {d.source[o.source]}
                 </p>
+                {o.status === "credit_hold" && o.holdReason && <p className="mt-1 text-[13px] text-warn">{o.holdReason}</p>}
               </Link>
             </li>
           ))}
@@ -112,6 +120,7 @@ export default async function DeskOrders({ searchParams }: PageProps<"/desk/orde
                   <td className="px-4 py-3 text-ink-2">{d.source[o.source]}</td>
                   <td className="px-4 py-3">
                     <DeskStatusBadge d={d} status={o.status} />
+                    {o.status === "credit_hold" && o.holdReason && <p className="mt-1 max-w-56 text-[13px] text-warn">{o.holdReason}</p>}
                   </td>
                   <td className="num px-4 py-3 text-right font-semibold">{formatPaise(o.totalPaise)}</td>
                 </tr>
