@@ -11,13 +11,14 @@ import { useCart } from "../cart-store";
 import { sizeLabel } from "../labels";
 import { Stepper } from "../stepper";
 import { CreditNotice, OrderSummary } from "../summary";
-import { usePricing } from "../use-pricing";
+import { usePricing } from "@/components/use-pricing";
+import { priceCartAction } from "../actions";
 
 type T = Messages["shop"];
 
 export function CartView({ t, common, lang }: { t: T; common: Messages["common"]; lang: Lang }) {
   const cart = useCart();
-  const { pricing, loading, error, retry } = usePricing(cart.lines);
+  const { pricing, loading, error, retry } = usePricing(cart.lines, priceCartAction);
   const [removedCount, setRemovedCount] = useState(0);
 
   // SKUs the server no longer sells to this shop are dropped from the cart, with a notice.

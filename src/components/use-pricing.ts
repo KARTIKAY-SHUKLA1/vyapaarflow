@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { CartPricing } from "@/server/pricing";
-import { priceCartAction } from "./actions";
-import type { CartLine } from "./cart-store";
+
+export type CartLine = { skuId: string; cases: number };
+export type PriceFetcher = (lines: CartLine[]) => Promise<{ ok: true; pricing: CartPricing } | { ok: false }>;
 
 type State = { key: string; pricing: CartPricing | null; error: boolean };
 
@@ -12,17 +13,23 @@ type State = { key: string; pricing: CartPricing | null; error: boolean };
  * the previous result dimmed while a new one is on its way, so typing a quantity
  * never flashes an empty screen. Stale responses are ignored.
  */
-export function usePricing(lines: CartLine[], debounceMs = 250) {
-  const key = JSON.stringify(lines);
+export function usePricing(lines: CartLine[], fetcher: PriceFetcher, debounceMs = 250, scope = "") {
+  // `scope` (e.g. the retailer being priced for) is part of the key, so changing it re-prices.
+  const key = JSON.stringify([scope, lines]);
   const [state, setState] = useState<State>({ key: "", pricing: null, error: false });
   const [attempt, setAttempt] = useState(0);
+  // Latest fetcher without re-running the effect on every render (callers may pass closures).
+  const fetcherRef = useRef(fetcher);
+  useEffect(() => {
+    fetcherRef.current = fetcher;
+  });
 
   useEffect(() => {
     let cancelled = false;
-    const parsed = JSON.parse(key) as CartLine[];
+    const parsed = (JSON.parse(key) as [string, CartLine[]])[1];
     const timer = setTimeout(async () => {
       try {
-        const res = await priceCartAction(parsed);
+        const res = await fetcherRef.current(parsed);
         if (!cancelled) setState({ key, pricing: res.ok ? res.pricing : null, error: !res.ok });
       } catch {
         if (!cancelled) setState((s) => ({ key, pricing: s.pricing, error: true }));

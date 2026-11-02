@@ -10,7 +10,8 @@ import { uuid } from "@/lib/uuid";
 import { placeOrderAction } from "../actions";
 import { useCart } from "../cart-store";
 import { CreditNotice, OrderSummary } from "../summary";
-import { usePricing } from "../use-pricing";
+import { usePricing } from "@/components/use-pricing";
+import { priceCartAction } from "../actions";
 
 type T = Messages["shop"];
 type Problem = "priceChanged" | "stockChanged" | "notOrderable" | "placeError" | null;
@@ -18,7 +19,7 @@ type Problem = "priceChanged" | "stockChanged" | "notOrderable" | "placeError" |
 export function Checkout({ t, common, lang }: { t: T; common: Messages["common"]; lang: Lang }) {
   const router = useRouter();
   const cart = useCart();
-  const { pricing, loading, error, retry, accept } = usePricing(cart.lines, 0);
+  const { pricing, loading, error, retry, accept } = usePricing(cart.lines, priceCartAction, 0);
   const [note, setNote] = useState("");
   const [problem, setProblem] = useState<Problem>(null);
   const [pending, startTransition] = useTransition();

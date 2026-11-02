@@ -115,3 +115,8 @@ In priority order: retailers with no order in 14 days · repeat order · van loa
 - **A8** Out-of-stock SKUs are visible but cannot be added; captured lines for them are flagged.
 - **A9** All brands, retailers, people and phone numbers in seed data are fictional.
 - **A10** SMS/WhatsApp, payment and Tally are mocked (outbox table, file export).
+- **A11** Credit exposure = outstanding (invoiced, from Tally) **+ open orders** (placed, approved, on hold). Without the second term a shop could place several orders each just under its limit.
+- **A12** Stock is reserved when an order is created (incl. free cases) and returned if the desk cancels it. Exported orders are final in this app; later changes happen in Tally.
+- **A13** Tally CSV column layout follows common Tally voucher-import templates (one row per line, Sales Order vouchers, amounts in rupees, UTF-8 BOM). The exact mapping must be confirmed against the client's import template.
+- **A14** Orders are placed in cases. A captured line in pieces or with no unit cannot become an order until the desk agrees the case quantity with the retailer (brief: "unclear units are asked, not guessed").
+- **A15** A desk correction that changes the product, or settles the unit, is saved as that shop's alias for those words. Changed quantities are not learned (they vary per order).

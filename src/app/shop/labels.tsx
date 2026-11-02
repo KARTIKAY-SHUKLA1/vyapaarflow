@@ -16,7 +16,7 @@ export function StockBadge({ t, status, cases }: { t: T; status: StockStatus; ca
   return <Badge tone="accent">{t.inStock}</Badge>;
 }
 
-const STATUS_TONE: Record<OrderStatus, "neutral" | "accent" | "warn" | "danger" | "info"> = {
+export const STATUS_TONE: Record<OrderStatus, "neutral" | "accent" | "warn" | "danger" | "info"> = {
   placed: "info",
   credit_hold: "warn",
   approved: "accent",

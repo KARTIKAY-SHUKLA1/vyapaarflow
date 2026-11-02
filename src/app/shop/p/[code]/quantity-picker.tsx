@@ -7,7 +7,8 @@ import { fill, type Messages } from "@/lib/i18n/messages";
 import { formatBp, formatPaise } from "@/lib/money";
 import { useCart } from "../../cart-store";
 import { Stepper } from "../../stepper";
-import { usePricing } from "../../use-pricing";
+import { usePricing } from "@/components/use-pricing";
+import { priceCartAction } from "../../actions";
 
 /** Pick cases and see the server-priced line (scheme, free cases, GST) before adding. */
 export function QuantityPicker({ skuId, stockCases, t, retryLabel }: { skuId: string; stockCases: number; t: Messages["shop"]; retryLabel: string }) {
@@ -15,7 +16,7 @@ export function QuantityPicker({ skuId, stockCases, t, retryLabel }: { skuId: st
   const inCart = cart.casesOf(skuId);
   const [cases, setCases] = useState(inCart || 1);
   const [added, setAdded] = useState(false);
-  const { pricing, loading, error, retry } = usePricing(stockCases > 0 && cases > 0 ? [{ skuId, cases }] : []);
+  const { pricing, loading, error, retry } = usePricing(stockCases > 0 && cases > 0 ? [{ skuId, cases }] : [], priceCartAction);
   const line = pricing?.lines[0];
 
   if (stockCases <= 0) return <Notice tone="danger">{t.issueOutOfStock}</Notice>;
