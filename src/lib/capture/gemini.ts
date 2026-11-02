@@ -1,6 +1,7 @@
 import {
   MODEL_TIMEOUT_MS,
   ModelBlockedError,
+  ModelHttpError,
   ModelIncompleteError,
   ModelOutputError,
   ModelTimeoutError,
@@ -149,8 +150,6 @@ function retryAfterMs(res: Response): number | null {
   return Math.round(Number(raw) * 1000);
 }
 
-class HttpStatusError extends Error {}
-
 function sleep(ms: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
     if (signal.aborted) return reject(new Error("aborted"));
@@ -186,7 +185,7 @@ export function createGeminiModel(env: Env = process.env, opts: GeminiOptions = 
 
   return {
     name: model,
-    async propose(req) {
+    async propose(req, ctx) {
       const body = {
         systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
         contents: [{ role: "user", parts: [{ text: renderUserPrompt(req) }] }],
@@ -205,6 +204,7 @@ export function createGeminiModel(env: Env = process.env, opts: GeminiOptions = 
       let data: GeminiResponse | undefined;
       try {
         for (let attempt = 0; attempt < 2; attempt++) {
+          ctx?.onAttempt?.();
           const res = await fetch(`${GEMINI_API_BASE}/models/${model}:generateContent`, {
             method: "POST",
             headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
@@ -227,11 +227,11 @@ export function createGeminiModel(env: Env = process.env, opts: GeminiOptions = 
             continue;
           }
           // Status only: error bodies can echo request details.
-          throw new HttpStatusError(`Gemini returned HTTP ${res.status}`);
+          throw new ModelHttpError(`Gemini returned HTTP ${res.status}`, res.status);
         }
       } catch (error) {
         if (controller.signal.aborted) throw new ModelTimeoutError(`no Gemini answer in ${timeoutMs} ms`);
-        if (error instanceof ModelOutputError || error instanceof HttpStatusError) throw error;
+        if (error instanceof ModelOutputError || error instanceof ModelHttpError) throw error;
         // Network failures: never pass through a message that could contain request details.
         throw new Error("Gemini request failed (network)");
       } finally {

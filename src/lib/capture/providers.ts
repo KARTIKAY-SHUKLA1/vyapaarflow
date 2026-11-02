@@ -1,6 +1,7 @@
 import {
   createAnthropicModel,
   MODEL_TIMEOUT_MS,
+  ModelHttpError,
   ModelOutputError,
   ModelTimeoutError,
   OUTPUT_SCHEMA,
@@ -73,7 +74,8 @@ export function createOpenAICompatibleModel(
 
   return {
     name: model,
-    async propose(req) {
+    async propose(req, ctx) {
+      ctx?.onAttempt?.();
       const headers: Record<string, string> = { "Content-Type": "application/json" };
       // Local servers need no key; only send one when configured.
       if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
@@ -100,7 +102,7 @@ export function createOpenAICompatibleModel(
           signal: controller.signal,
         });
         // Status only: provider error bodies can echo request details.
-        if (!res.ok) throw new Error(`model endpoint returned HTTP ${res.status}`);
+        if (!res.ok) throw new ModelHttpError(`model endpoint returned HTTP ${res.status}`, res.status);
         data = (await res.json().catch(() => {
           throw new ModelOutputError("model endpoint returned a non-JSON response");
         })) as ChatCompletion;

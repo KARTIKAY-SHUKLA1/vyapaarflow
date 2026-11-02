@@ -1,3 +1,4 @@
+import type { CircuitBreaker } from "./breaker";
 import { rulesLine, type AnalysedSegment } from "./line";
 import {
   MODEL_TIMEOUT_MS,
@@ -5,6 +6,7 @@ import {
   ModelIncompleteError,
   ModelOutputError,
   ModelTimeoutError,
+  isAvailabilityFailure,
   type CaptureModel,
   type ModelRequest,
 } from "./llm";
@@ -13,7 +15,7 @@ import { normalizeTokens } from "./normalize";
 import { parseSegment } from "./parse";
 import { createCaptureModel } from "./providers";
 import { splitMessage } from "./split";
-import type { CaptureInput, CaptureResult } from "./types";
+import type { CaptureDiagnostics, CaptureInput, CaptureResult } from "./types";
 import { mergeModelOutput } from "./validate";
 
 /** WhatsApp orders are short; capping input bounds cost and latency. */
@@ -85,6 +87,10 @@ export type CaptureOptions = {
   /** Omitted: use the provider configured in env (see providers.ts). null: rules only. */
   model?: CaptureModel | null;
   timeoutMs?: number;
+  /** Shared circuit breaker (the server passes one); omitted = no pause logic. */
+  breaker?: CircuitBreaker | null;
+  /** Manual "Re-read with AI": call the model even while the breaker is open. */
+  bypassBreaker?: boolean;
 };
 
 /**
@@ -97,24 +103,46 @@ export async function captureOrder(input: CaptureInput, opts: CaptureOptions = {
   const message = input.message.slice(0, MAX_MESSAGE_CHARS);
   const ctx = buildMatchContext(input.catalogue, input.aliases, input.history);
   const { segments, ignoredText } = analyse(message, ctx);
+  const diagnostics: CaptureDiagnostics = { attemptedModel: null, attempts: 0, latencyMs: null, bypassedPause: false };
   const rules = (fallbackReason: string | null): CaptureResult => ({
     engine: "rules",
     model: null,
     fallbackReason,
     lines: segments.map((s) => rulesLine(s, ctx)),
     ignoredText,
+    diagnostics,
   });
 
   if (segments.length === 0) return rules(message.trim() === "" ? "empty_message" : "no_items_found");
   const model = opts.model === undefined ? createCaptureModel() : opts.model;
   if (!model) return rules("no_api_key");
+  diagnostics.attemptedModel = model.name;
 
+  // Provider recently slow/failing: don't make the desk wait 12 s for the same fallback.
+  const breaker = opts.breaker ?? null;
+  if (breaker?.isOpen()) {
+    if (!opts.bypassBreaker) return rules("model_paused");
+    diagnostics.bypassedPause = true;
+  }
+
+  const started = Date.now();
   try {
     const request = modelRequest(message, segments, ctx);
-    const raw = await withTimeout(model.propose(request), opts.timeoutMs ?? MODEL_TIMEOUT_MS);
+    const raw = await withTimeout(
+      model.propose(request, { onAttempt: () => void diagnostics.attempts++ }),
+      opts.timeoutMs ?? MODEL_TIMEOUT_MS,
+    );
+    diagnostics.latencyMs = Date.now() - started;
+    diagnostics.attempts ||= 1; // models that don't report attempts made exactly one call
+    breaker?.recordSuccess();
     const lines = mergeModelOutput(raw, segments, request, ctx);
-    return { engine: "llm", model: model.name, fallbackReason: null, lines, ignoredText };
+    return { engine: "llm", model: model.name, fallbackReason: null, lines, ignoredText, diagnostics };
   } catch (error) {
+    diagnostics.latencyMs = Date.now() - started;
+    diagnostics.attempts ||= 1;
+    // Only "provider unavailable" counts towards a pause; a reachable provider resets it.
+    if (isAvailabilityFailure(error)) breaker?.recordFailure();
+    else breaker?.recordSuccess();
     const reason = fallbackReason(error);
     // Never silent: the desk sees "rule-based" in the UI, and the server log keeps the cause.
     console.warn(`[capture] model fallback (${reason}):`, error instanceof Error ? error.message : error);

@@ -14,7 +14,13 @@ import {
   type OrderStatus,
 } from "@/db/schema";
 import type { Viewer } from "@/lib/auth/policy";
-import { aliasPhrase, captureOrder, MAX_MESSAGE_CHARS, type CaptureModel } from "@/lib/capture";
+import { aliasPhrase, captureOrder, CircuitBreaker, MAX_MESSAGE_CHARS, type CaptureModel } from "@/lib/capture";
+
+/**
+ * One breaker per server process for automatic AI reads (see lib/capture/breaker.ts).
+ * After 2 timeouts / 5xx within ~5 min, automatic reads use rules for 2 min.
+ */
+export const aiBreaker = new CircuitBreaker();
 import { isDesk } from "./desk";
 import { createOrder, withBusyRetry, type PlaceOrderResult } from "./orders";
 import { cartSchema, priceCart } from "./pricing";
@@ -109,7 +115,14 @@ export async function runCapture(
   db: DB,
   viewer: Viewer,
   messageId: string,
-  opts: { force?: boolean; model?: CaptureModel | null; now?: Date } = {},
+  opts: {
+    force?: boolean;
+    model?: CaptureModel | null;
+    now?: Date;
+    /** Manual "Re-read with AI": call the model even while automatic reads are paused. */
+    bypassPause?: boolean;
+    breaker?: CircuitBreaker;
+  } = {},
 ): Promise<RunCaptureResult> {
   if (!isDesk(viewer)) return { ok: false, error: "FORBIDDEN" };
   const [msg] = await db.select().from(inboundMessages).where(eq(inboundMessages.id, messageId));
@@ -121,7 +134,10 @@ export async function runCapture(
   if (latest?.status === "draft" && !opts.force) return { ok: true, captureId: latest.id, reused: true };
 
   const ctx = await captureContext(db, msg.retailerId);
-  const result = await captureOrder({ message: msg.body, ...ctx }, opts.model === undefined ? {} : { model: opts.model });
+  const result = await captureOrder(
+    { message: msg.body, ...ctx },
+    { ...(opts.model === undefined ? {} : { model: opts.model }), breaker: opts.breaker ?? aiBreaker, bypassBreaker: opts.bypassPause === true },
+  );
   const now = opts.now ?? new Date();
 
   const captureId = await db.transaction(async (tx) => {
@@ -153,7 +169,15 @@ export async function runCapture(
       action: "capture.created",
       entity: "message",
       entityId: messageId,
-      data: { captureId: cap.id, engine: result.engine, model: result.model, fallbackReason: result.fallbackReason, lines: result.lines.length },
+      data: {
+        captureId: cap.id,
+        engine: result.engine,
+        model: result.model,
+        fallbackReason: result.fallbackReason,
+        lines: result.lines.length,
+        // Metadata only: never the prompt, the model's answer or any key.
+        ai: result.diagnostics,
+      },
       createdAt: now,
     });
     return cap.id;

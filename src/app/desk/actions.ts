@@ -31,7 +31,9 @@ export async function transitionAction(input: unknown): Promise<TransitionResult
 export async function runCaptureAction(formData: FormData) {
   const viewer = await requireViewer("desk");
   const messageId = String(formData.get("messageId") ?? "");
-  const res = await runCapture(db, viewer, messageId, { force: formData.get("force") === "1" });
+  // "Re-read with AI" (force) is a manual retry: it bypasses an automatic AI pause.
+  const manual = formData.get("force") === "1";
+  const res = await runCapture(db, viewer, messageId, { force: manual, bypassPause: manual });
   revalidatePath("/desk", "layout");
   if (!res.ok && res.error === "NOT_FOUND") redirect("/desk/inbox");
   redirect(`/desk/inbox/${messageId}`);
@@ -42,7 +44,7 @@ export async function linkAndRerunAction(formData: FormData) {
   const messageId = String(formData.get("messageId") ?? "");
   const retailerId = String(formData.get("retailerId") ?? "");
   const linked = await linkMessageToRetailer(db, viewer, messageId, retailerId);
-  if (linked.ok) await runCapture(db, viewer, messageId, { force: true });
+  if (linked.ok) await runCapture(db, viewer, messageId, { force: true, bypassPause: true }); // explicit desk action
   revalidatePath("/desk", "layout");
   redirect(`/desk/inbox/${messageId}`);
 }

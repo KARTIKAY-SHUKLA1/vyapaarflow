@@ -17,6 +17,7 @@ import { uuid } from "@/lib/uuid";
 import type { PricedCartLine } from "@/server/pricing";
 import { sizeLabel } from "../../../shop/labels";
 import { confirmCaptureAction, dismissAction, linkAndRerunAction, priceForDeskAction, runCaptureAction } from "../../actions";
+import { engineNotice } from "../../engine-notice";
 
 type D = Messages["desk"];
 type Line = typeof captureLines.$inferSelect;
@@ -151,13 +152,16 @@ export function Review({ lang, d, shopT, message, capture, lines, catalogue, ord
           <blockquote className="mt-1 rounded-md bg-sunken p-3 text-[16px] leading-relaxed whitespace-pre-wrap">{message.body}</blockquote>
         </Card>
 
-        {capture && (
-          <Notice tone={capture.engine === "llm" ? "info" : "warn"}>
-            {capture.engine === "llm"
-              ? fill(d.engineLlm, { model: capture.model ?? "AI" })
-              : fill(d.engineRules, { reason: (d.fallback as Record<string, string>)[capture.fallbackReason ?? ""] ?? capture.fallbackReason ?? "" })}
-          </Notice>
-        )}
+        {capture &&
+          (() => {
+            const notice = engineNotice(d, capture);
+            return (
+              <Notice tone={notice.tone}>
+                {notice.text}
+                {editable && notice.hint && <span className="mt-1 block">{notice.hint}</span>}
+              </Notice>
+            );
+          })()}
 
         {!retailerId && message.status !== "dismissed" && message.status !== "converted" && (
           <Card className="p-4">

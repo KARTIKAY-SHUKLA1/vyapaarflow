@@ -51,4 +51,17 @@ export type CaptureResult = {
   lines: CaptureLine[];
   /** Message fragments that carried no item (greetings, delivery notes). */
   ignoredText: string[];
+  /** Metadata only (no prompt, answer or key), for the audit log and incident diagnosis. */
+  diagnostics: CaptureDiagnostics;
+};
+
+export type CaptureDiagnostics = {
+  /** Model that was (or would have been) called; null when none is configured. */
+  attemptedModel: string | null;
+  /** HTTP attempts made (0 when the model was not called). */
+  attempts: number;
+  /** Wall time spent on the model call, ms; null when it was not called. */
+  latencyMs: number | null;
+  /** The automatic pause was skipped because the desk asked for a manual re-read. */
+  bypassedPause: boolean;
 };

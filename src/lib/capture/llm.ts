@@ -24,10 +24,13 @@ export type ModelRequest = {
   pastSkus: (ModelCandidate & { timesOrdered: number })[];
 };
 
+/** Optional hooks a model may call; used only for diagnostics (attempt counts). */
+export type ProposeContext = { onAttempt?: () => void };
+
 export interface CaptureModel {
   name: string;
   /** Returns raw, unvalidated model output. */
-  propose(req: ModelRequest): Promise<unknown>;
+  propose(req: ModelRequest, ctx?: ProposeContext): Promise<unknown>;
 }
 
 /**
@@ -101,6 +104,25 @@ export class ModelBlockedError extends ModelOutputError {}
 export class ModelIncompleteError extends ModelOutputError {}
 /** No answer within the time budget. */
 export class ModelTimeoutError extends Error {}
+/** The provider answered with a non-2xx status. The message carries the status only. */
+export class ModelHttpError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+  }
+}
+
+/**
+ * Does this failure say the provider is unavailable (timeout or HTTP 5xx)?
+ * Covers our own errors and the Anthropic SDK's API errors (which carry `status`).
+ */
+export function isAvailabilityFailure(error: unknown): boolean {
+  if (error instanceof ModelTimeoutError) return true;
+  const status = (error as { status?: unknown } | null)?.status;
+  return typeof status === "number" && status >= 500;
+}
 
 function parseJson(text: string): unknown {
   try {
@@ -120,7 +142,8 @@ export function createAnthropicModel(env: Record<string, string | undefined> = p
 
   return {
     name: model,
-    async propose(req) {
+    async propose(req, ctx) {
+      ctx?.onAttempt?.(); // the SDK may retry once internally; counted as one attempt here
       let response: Anthropic.Message;
       try {
         response = await client.messages.create({
