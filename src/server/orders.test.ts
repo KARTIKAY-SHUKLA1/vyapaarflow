@@ -260,6 +260,16 @@ describe("placeOrder", () => {
   });
 });
 
+describe("listOrdersForRetailer", () => {
+  it("reports line and case counts per order", async () => {
+    const v = await viewerFor("919000000001");
+    const res = await order(v, [{ code: "SKU-BS-075", cases: 10 }, { code: "SKU-DT-1KG", cases: 2 }]);
+    if (!res.ok) throw new Error("order failed");
+    const row = (await listOrdersForRetailer(db, v.retailerId!)).find((o) => o.id === res.orderId)!;
+    expect(row).toMatchObject({ lineCount: 2, cases: 12, status: "placed" });
+  });
+});
+
 describe("order visibility", () => {
   it("lets a retailer see only their own orders", async () => {
     const sharma = await viewerFor("919000000001");

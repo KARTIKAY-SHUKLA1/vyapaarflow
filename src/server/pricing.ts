@@ -71,8 +71,21 @@ export async function priceCart(db: DB, retailerId: string, input: CartLine[], a
   return {
     asOf,
     lines: result.lines.map((pl) => {
-      const { schemes: _rules, stockCases: _stock, gstRateBp: _gst, casePricePaise: _case, ...info } = byId.get(pl.skuId)!;
-      return { ...pl, item: info };
+      const c = byId.get(pl.skuId)!;
+      const item: CartItemInfo = {
+        id: c.id,
+        code: c.code,
+        name: c.name,
+        nameHi: c.nameHi,
+        brand: c.brand,
+        category: c.category,
+        packSize: c.packSize,
+        imageKey: c.imageKey,
+        pricePerPiecePaise: c.pricePerPiecePaise,
+        stockStatus: c.stockStatus,
+        scheme: c.scheme,
+      };
+      return { ...pl, item };
     }),
     totals: result.totals,
     credit: { ...result.credit, position: credit },

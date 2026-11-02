@@ -203,11 +203,13 @@ export async function listOrdersForRetailer(db: DB, retailerId: string, limit = 
       source: orders.source,
       totalPaise: orders.totalPaise,
       createdAt: orders.createdAt,
-      lineCount: sql<number>`(select count(*) from ${orderLines} where ${orderLines.orderId} = ${orders.id})`,
-      cases: sql<number>`(select coalesce(sum(${orderLines.cases}), 0) from ${orderLines} where ${orderLines.orderId} = ${orders.id})`,
+      lineCount: sql<number>`count(${orderLines.id})`.mapWith(Number),
+      cases: sql<number>`coalesce(sum(${orderLines.cases}), 0)`.mapWith(Number),
     })
     .from(orders)
+    .leftJoin(orderLines, eq(orderLines.orderId, orders.id))
     .where(eq(orders.retailerId, retailerId))
+    .groupBy(orders.id)
     .orderBy(desc(orders.createdAt))
     .limit(limit);
 }
