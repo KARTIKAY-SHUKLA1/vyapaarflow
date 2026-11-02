@@ -1,6 +1,5 @@
 import { rulesLine, type AnalysedSegment } from "./line";
 import {
-  createAnthropicModel,
   MODEL_TIMEOUT_MS,
   ModelOutputError,
   ModelTimeoutError,
@@ -10,6 +9,7 @@ import {
 import { buildMatchContext, matchSegment, type MatchContext } from "./match";
 import { normalizeTokens } from "./normalize";
 import { parseSegment } from "./parse";
+import { createCaptureModel } from "./providers";
 import { splitMessage } from "./split";
 import type { CaptureInput, CaptureResult } from "./types";
 import { mergeModelOutput } from "./validate";
@@ -77,7 +77,7 @@ function fallbackReason(error: unknown): string {
 }
 
 export type CaptureOptions = {
-  /** Omitted: use Anthropic if ANTHROPIC_API_KEY is set. null: rules only. */
+  /** Omitted: use the provider configured in env (see providers.ts). null: rules only. */
   model?: CaptureModel | null;
   timeoutMs?: number;
 };
@@ -101,7 +101,7 @@ export async function captureOrder(input: CaptureInput, opts: CaptureOptions = {
   });
 
   if (segments.length === 0) return rules(message.trim() === "" ? "empty_message" : "no_items_found");
-  const model = opts.model === undefined ? createAnthropicModel() : opts.model;
+  const model = opts.model === undefined ? createCaptureModel() : opts.model;
   if (!model) return rules("no_api_key");
 
   try {
