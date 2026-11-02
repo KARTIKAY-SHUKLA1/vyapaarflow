@@ -1,5 +1,5 @@
-import { PageSkeleton } from "@/components/page-skeleton";
+import { DeskOverviewSkeleton } from "@/components/skeletons";
 
 export default function Loading() {
-  return <PageSkeleton tiles={5} rows={2} />;
+  return <DeskOverviewSkeleton />;
 }

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
-import { Button, Card, EmptyState, Notice } from "@/components/ui";
+import { Button, ButtonLink, Card, EmptyState, Notice } from "@/components/ui";
 import { fill, type Messages } from "@/lib/i18n/messages";
 import { formatPaise } from "@/lib/money";
 import { exportAction } from "../../actions";
@@ -17,7 +17,7 @@ export function ExportPicker({ d, orders }: { d: Messages["desk"]; orders: Row[]
   const [done, setDone] = useState<{ id: string; count: number; fileName: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  if (orders.length === 0 && !done) return <EmptyState title={d.exportNoneTitle} body={d.exportNoneBody} />;
+  if (orders.length === 0 && !done) return <EmptyState icon="export" title={d.exportNoneTitle} body={d.exportNoneBody} action={<ButtonLink href="/desk/orders?filter=placed" variant="secondary">{d.toApprove}</ButtonLink>} />;
 
   const chosen = orders.filter((o) => selected.has(o.id));
   const total = chosen.reduce((s, o) => s + o.totalPaise, 0);

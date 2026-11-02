@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { ComponentProps, ReactNode } from "react";
+import { Icon, type IconName } from "./icons";
 
 /** Tiny class joiner; avoids a dependency. */
 export function cx(...parts: (string | false | null | undefined)[]) {
@@ -89,9 +90,14 @@ export function PageHeader({ title, subtitle, action }: { title: string; subtitl
   );
 }
 
-export function EmptyState({ title, body, action }: { title: string; body?: string; action?: ReactNode }) {
+export function EmptyState({ title, body, action, icon }: { title: string; body?: string; action?: ReactNode; icon?: IconName }) {
   return (
     <div className="rounded-lg border border-dashed border-line-strong px-6 py-12 text-center">
+      {icon && (
+        <span className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-full bg-sunken text-ink-2">
+          <Icon name={icon} size={26} />
+        </span>
+      )}
       <p className="font-semibold">{title}</p>
       {body && <p className="mx-auto mt-1 max-w-sm text-[15px] text-ink-2">{body}</p>}
       {action && <div className="mt-4">{action}</div>}
@@ -99,8 +105,8 @@ export function EmptyState({ title, body, action }: { title: string; body?: stri
   );
 }
 
-export function Skeleton({ className }: { className?: string }) {
-  return <div aria-hidden className={cx("animate-pulse rounded-md bg-sunken", className)} />;
+export function Skeleton({ className, style }: { className?: string; style?: React.CSSProperties }) {
+  return <div aria-hidden className={cx("rounded-md bg-sunken motion-safe:animate-pulse", className)} style={style} />;
 }
 
 export function Stat({ label, value, hint, tone }: { label: string; value: ReactNode; hint?: ReactNode; tone?: "danger" | "warn" }) {

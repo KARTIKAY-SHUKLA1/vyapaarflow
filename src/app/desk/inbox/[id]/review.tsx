@@ -245,7 +245,7 @@ export function Review({ lang, d, shopT, message, capture, lines, catalogue, ord
             />
           )
         ) : lines.length === 0 ? (
-          <EmptyState title={d.noLines} />
+          <EmptyState icon="inbox" title={d.noLines} />
         ) : (
           <ol className="space-y-3">
             {lines.map((l) => (

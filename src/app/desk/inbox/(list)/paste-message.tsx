@@ -30,6 +30,7 @@ export function PasteMessage({ d, shops }: { d: Messages["desk"]; shops: Shop[] 
         <label className="block">
           <span className="mb-1 block text-[14px] font-medium">{d.pasteText}</span>
           <textarea
+            id="paste-body"
             name="body"
             required
             minLength={2}

@@ -5,7 +5,7 @@ import { auditLog, orderLines, orders, retailers, skus, stock, users } from "@/d
 import type { Viewer } from "@/lib/auth/policy";
 import { testDb } from "@/test/db";
 import { loadCatalogue, loadCredit } from "./catalogue";
-import { getOrderForViewer, listOrdersForRetailer, placeOrder } from "./orders";
+import { getOrderForViewer, listOrdersForRetailer, orderItemPreviews, placeOrder } from "./orders";
 import { priceCart } from "./pricing";
 
 const NOW = new Date("2026-11-02T10:00:00+05:30");
@@ -267,6 +267,22 @@ describe("listOrdersForRetailer", () => {
     if (!res.ok) throw new Error("order failed");
     const row = (await listOrdersForRetailer(db, v.retailerId!)).find((o) => o.id === res.orderId)!;
     expect(row).toMatchObject({ lineCount: 2, cases: 12, status: "placed" });
+  });
+});
+
+describe("orderItemPreviews", () => {
+  it("lists each order's items, largest first, only for the retailer's own orders", async () => {
+    const v = await viewerFor("919000000001");
+    const res = await order(v, [{ code: "SKU-DT-1KG", cases: 2 }, { code: "SKU-BS-075", cases: 10 }]);
+    if (!res.ok) throw new Error("order failed");
+    const mine = await orderItemPreviews(db, v.retailerId!, [res.orderId]);
+    expect(mine.get(res.orderId)?.map((i) => [i.name, i.cases])).toEqual([
+      ["Glucose biscuit 75 g, case of 96", 10],
+      ["Detergent powder 1 kg, case of 20", 2],
+    ]);
+    const other = await viewerFor("919000000009");
+    expect((await orderItemPreviews(db, other.retailerId!, [res.orderId])).size).toBe(0);
+    expect((await orderItemPreviews(db, v.retailerId!, [])).size).toBe(0);
   });
 });
 

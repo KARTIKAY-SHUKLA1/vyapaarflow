@@ -8,6 +8,7 @@ import { requireViewer } from "@/lib/auth/dal";
 import { getMessages } from "@/lib/i18n/server";
 import { CartProvider } from "./cart-store";
 import { ShopBottomNav, ShopTabs } from "./shop-nav";
+import { ToastProvider } from "./toast";
 
 export default async function ShopLayout({ children }: LayoutProps<"/shop">) {
   const viewer = await requireViewer("shop");
@@ -19,6 +20,7 @@ export default async function ShopLayout({ children }: LayoutProps<"/shop">) {
 
   return (
     <CartProvider retailerId={viewer.retailerId!}>
+      <ToastProvider t={t.shop}>
       <div className="flex min-h-full flex-1 flex-col">
         <header className="sticky top-0 z-20 border-b border-line bg-surface/95 backdrop-blur">
           <div className="mx-auto flex h-14 w-full max-w-5xl items-center justify-between gap-2 px-4">
@@ -36,6 +38,7 @@ export default async function ShopLayout({ children }: LayoutProps<"/shop">) {
         <main className="mx-auto w-full max-w-5xl flex-1 px-4 pt-5 pb-28 sm:pb-10">{children}</main>
         <ShopBottomNav t={t.shop.nav} />
       </div>
+      </ToastProvider>
     </CartProvider>
   );
 }

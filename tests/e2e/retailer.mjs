@@ -27,6 +27,8 @@ export default async function retailer(browser) {
   const found = await page.$$eval("main ul > li a[href^='/shop/p/']", (as) => [...new Set(as.map((a) => a.getAttribute("href")))]);
   c.eq("search 'glucose 75' finds only the 75 g pack", found.join(","), "/shop/p/SKU-BS-075");
   await click(page, "::-p-xpath(//main//li//button[normalize-space(.)='+ Add'])");
+  const toast = await page.waitForSelector("::-p-xpath(//div[@role='status'][contains(., 'Glucose biscuit 75 g added')])", { timeout: 5000 }).catch(() => null);
+  c.ok("add-to-cart toast names the product and offers View cart", !!toast && (await toast.evaluate((el) => el.innerText)).includes("View cart"));
   await typeInto(page, 'main input[aria-label="Cases"]', "5");
   await page.keyboard.press("Enter");
   await settle(300);
@@ -113,6 +115,7 @@ export default async function retailer(browser) {
   t = await mainText(page);
   const number = t.match(/SO-\d{4}-\d{4}/)?.[0];
   c.ok("success state after placing", t.includes("Order placed") && !!number);
+  c.ok("success explains what happens next", t.includes("What happens next") && t.includes("The order desk checks your order and stock.") && t.includes("Continue shopping"));
   c.ok("free case and note kept on the order", t.includes("+1 free") && t.includes("Deliver before 10 am please"));
   await shot(page, "r05-placed");
 
@@ -122,10 +125,16 @@ export default async function retailer(browser) {
   // Order history + detail
   await page.goto(`${BASE}/shop/orders`, { waitUntil: "networkidle0" });
   t = await mainText(page);
-  c.ok("new order first in history with counts", t.indexOf(number) >= 0 && /2 items · 13 cases/.test(t));
-  await click(page, `::-p-xpath(//a[contains(., '${number}')])`);
-  await page.waitForFunction(() => location.pathname.startsWith("/shop/orders/"));
-  await settle(500);
+  const firstRow = await page.$eval("main ul > li", (li) => li.innerText);
+  c.ok("history shows what was ordered and its progress", firstRow.includes(number) && firstRow.includes("Glucose biscuit 75 g ×10 · Detergent powder 1 kg ×3") && firstRow.includes("Received"), firstRow.replaceAll("\n", " | "));
+
+  // Reorder straight from the list row
+  await click(page, "::-p-xpath((//main//ul/li)[1]//button[normalize-space(.)='Order again'])");
+  await page.waitForFunction(() => location.pathname === "/shop/cart");
+  await page.waitForFunction(() => document.querySelector("main")?.innerText.includes("Detergent powder 1 kg"), { timeout: 15000 }).catch(() => {});
+  t = await mainText(page);
+  c.ok("order again from the list fills the cart", t.includes("Glucose biscuit 75 g") && t.includes("Detergent powder 1 kg"));
+  await page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith("vf_cart_")).forEach((k) => localStorage.removeItem(k)));
 
   // Repeat an earlier (seeded) order from its detail page
   await page.goto(`${BASE}/shop/orders`, { waitUntil: "networkidle0" });

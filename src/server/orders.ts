@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, like, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, like, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { DB } from "@/db";
 import { auditLog, orderLines, orders, retailers, schemes, skus, stock, type OrderSource, type OrderStatus } from "@/db/schema";
@@ -233,6 +233,26 @@ export async function listOrdersForRetailer(db: DB, retailerId: string, limit = 
     .groupBy(orders.id)
     .orderBy(desc(orders.createdAt))
     .limit(limit);
+}
+
+export type OrderItemPreview = { skuId: string; name: string; nameHi: string; cases: number };
+
+/**
+ * Items per order for the retailer's order list (read-only). Scoped to the
+ * retailer, so ids from another shop return nothing.
+ */
+export async function orderItemPreviews(db: DB, retailerId: string, orderIds: string[]): Promise<Map<string, OrderItemPreview[]>> {
+  const out = new Map<string, OrderItemPreview[]>();
+  if (orderIds.length === 0) return out;
+  const rows = await db
+    .select({ orderId: orderLines.orderId, skuId: orderLines.skuId, cases: orderLines.cases, name: skus.name, nameHi: skus.nameHi })
+    .from(orderLines)
+    .innerJoin(orders, eq(orders.id, orderLines.orderId))
+    .innerJoin(skus, eq(skus.id, orderLines.skuId))
+    .where(and(eq(orders.retailerId, retailerId), inArray(orderLines.orderId, orderIds)))
+    .orderBy(desc(orderLines.cases), skus.name);
+  for (const r of rows) out.set(r.orderId, [...(out.get(r.orderId) ?? []), { skuId: r.skuId, name: r.name, nameHi: r.nameHi, cases: r.cases }]);
+  return out;
 }
 
 /** Order with lines, or null if it does not exist OR the viewer may not see it (no existence leak). */

@@ -45,7 +45,7 @@ export function CartView({ t, common, lang }: { t: T; common: Messages["common"]
             <Notice tone="warn">{fill(t.unavailable, { n: removedCount })}</Notice>
           </div>
         )}
-        <EmptyState title={t.cartEmptyTitle} body={t.cartEmptyBody} action={<ButtonLink href="/shop">{t.browse}</ButtonLink>} />
+        <EmptyState icon="cart" title={t.cartEmptyTitle} body={t.cartEmptyBody} action={<ButtonLink href="/shop">{t.browse}</ButtonLink>} />
       </>
     );
   }

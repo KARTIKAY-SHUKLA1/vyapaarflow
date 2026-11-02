@@ -8,8 +8,9 @@ import { Badge, Button, cx, EmptyState } from "@/components/ui";
 import { fill, type Messages } from "@/lib/i18n/messages";
 import { formatPaise } from "@/lib/money";
 import type { StockStatus } from "@/server/catalogue";
-import { categoryLabel, StockBadge } from "../labels";
+import { categoryLabel, shortName, StockBadge } from "../labels";
 import { useCart, type CartLine } from "../cart-store";
+import { useToast } from "../toast";
 import { Stepper } from "../stepper";
 
 export type CatalogueCard = {
@@ -63,7 +64,7 @@ export function Catalogue({
   const byId = useMemo(() => new Map(items.map((i) => [i.id, i])), [items]);
   const showUsual = usual.length > 0 && !category && !deferredQuery.trim();
 
-  if (items.length === 0) return <EmptyState title={t.emptyCatalogueTitle} body={t.emptyCatalogueBody} />;
+  if (items.length === 0) return <EmptyState icon="search" title={t.emptyCatalogueTitle} body={t.emptyCatalogueBody} />;
 
   return (
     <>
@@ -123,6 +124,7 @@ export function Catalogue({
 
       {visible.length === 0 ? (
         <EmptyState
+          icon="search"
           title={t.noResultsTitle}
           body={t.noResultsBody}
           action={
@@ -174,6 +176,7 @@ function SchemeBadge({ text }: { text: string }) {
 /** One usual item: what the shop normally buys, added in one tap at its usual quantity. */
 function UsualTile({ item, usualCases, t }: { item: CatalogueCard; usualCases: number; t: T }) {
   const cart = useCart();
+  const toast = useToast();
   const inCart = cart.casesOf(item.id);
   const out = item.stockStatus === "out";
   const cases = Math.max(1, Math.min(usualCases, item.stockCases));
@@ -190,11 +193,11 @@ function UsualTile({ item, usualCases, t }: { item: CatalogueCard; usualCases: n
             {t.outOfStock}
           </Button>
         ) : inCart > 0 ? (
-          <Button variant="secondary" onClick={() => cart.setCases(item.id, inCart + cases)} className="w-full">
+          <Button variant="secondary" onClick={() => (cart.setCases(item.id, inCart + cases), toast.added(shortName(item.name)))} className="w-full">
             {fill(t.inCart, { n: inCart })} · +{cases}
           </Button>
         ) : (
-          <Button onClick={() => cart.setCases(item.id, cases)} className="w-full">
+          <Button onClick={() => (cart.setCases(item.id, cases), toast.added(shortName(item.name)))} className="w-full">
             {fill(t.addUsual, { n: cases })}
           </Button>
         )}
@@ -206,6 +209,7 @@ function UsualTile({ item, usualCases, t }: { item: CatalogueCard; usualCases: n
 /** Compact card: about twice as many products per phone screen; the action sits beside the price. */
 function ProductCard({ item, t, common }: { item: CatalogueCard; t: T; common: Messages["common"] }) {
   const cart = useCart();
+  const toast = useToast();
   const inCart = cart.casesOf(item.id);
   const out = item.stockStatus === "out";
   const labels = { decrease: t.decrease, increase: t.increase, cases: t.casesLabel };
@@ -237,7 +241,7 @@ function ProductCard({ item, t, common }: { item: CatalogueCard; t: T; common: M
           {out ? (
             <span className="shrink-0 pb-1 text-[14px] font-medium text-ink-3">{t.outOfStock}</span>
           ) : inCart === 0 ? (
-            <Button onClick={() => cart.setCases(item.id, 1)} className="shrink-0 px-5" aria-label={`${t.add}: ${item.name}`}>
+            <Button onClick={() => (cart.setCases(item.id, 1), toast.added(shortName(item.name)))} className="shrink-0 px-5" aria-label={`${t.add}: ${item.name}`}>
               + {t.add}
             </Button>
           ) : null}

@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { Button, cx, EmptyState, PageHeader } from "@/components/ui";
+import { Button, ButtonLink, cx, EmptyState, PageHeader } from "@/components/ui";
 import { db } from "@/db";
 import { requireViewer } from "@/lib/auth/dal";
 import { formatDateTime } from "@/lib/dates";
@@ -56,7 +56,7 @@ export default async function DeskOrders({ searchParams }: PageProps<"/desk/orde
       </div>
 
       {rows.length === 0 ? (
-        <EmptyState title={d.noOrdersTitle} body={d.noOrdersBody} />
+        <EmptyState icon="orders" title={d.noOrdersTitle} body={d.noOrdersBody} action={filter !== "all" || q ? <ButtonLink href="/desk/orders?filter=all" variant="secondary">{d.showAllOrders}</ButtonLink> : undefined} />
       ) : (
         <>
         {/* Phones: one card per order, everything readable without sideways scrolling. */}

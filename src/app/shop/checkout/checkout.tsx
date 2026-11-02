@@ -31,7 +31,7 @@ export function Checkout({ t, common, lang }: { t: T; common: Messages["common"]
     return (
       <>
         <PageHeader title={t.checkoutTitle} />
-        <EmptyState title={t.cartEmptyTitle} body={t.cartEmptyBody} action={<ButtonLink href="/shop">{t.browse}</ButtonLink>} />
+        <EmptyState icon="cart" title={t.cartEmptyTitle} body={t.cartEmptyBody} action={<ButtonLink href="/shop">{t.browse}</ButtonLink>} />
       </>
     );
   }

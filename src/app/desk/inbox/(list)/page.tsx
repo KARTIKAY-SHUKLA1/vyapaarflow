@@ -49,7 +49,7 @@ export default async function Inbox({ searchParams }: PageProps<"/desk/inbox">) 
 
       <div className="grid gap-5 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] lg:items-start">
         {messages.length === 0 ? (
-          <EmptyState title={d.inboxEmptyTitle} body={d.inboxEmptyBody} />
+          <EmptyState icon="inbox" title={d.inboxEmptyTitle} body={d.inboxEmptyBody} action={<ButtonLink href="#paste-body" variant="secondary">{d.pasteOne}</ButtonLink>} />
         ) : (
           <ul className="space-y-3">
             {messages.map((m) => (
