@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useMemo, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
 import { ProductImage } from "@/components/product-image";
 import { SubmitButton } from "@/components/submit-button";
 import { Badge, Button, ButtonLink, Card, cx, EmptyState, Notice, Skeleton } from "@/components/ui";
@@ -89,6 +89,30 @@ export function Review({ lang, d, shopT, message, capture, lines, catalogue, ord
   const states = lines.map((l) => ({ id: l.id, state: lineState(l) }));
   const attentionIds = states.filter((x) => x.state === "attention").map((x) => x.id);
   const showFirstAttention = () => attentionIds[0] && document.getElementById(`review-line-${attentionIds[0]}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+  // Phones: the confirm panel sits in the page flow after the lines (so it never covers them). A one-row bar
+  // that jumps to it appears only once the summary has scrolled off the top and the panel is still below.
+  const [showBar, setShowBar] = useState(false);
+  const hasPanel = !!editable && lines.length > 0;
+  useEffect(() => {
+    if (!hasPanel) return;
+    const wide = window.matchMedia("(min-width: 640px)");
+    const update = () => {
+      const summary = document.getElementById("review-summary")?.getBoundingClientRect();
+      const panel = document.getElementById("review-confirm")?.getBoundingClientRect();
+      setShowBar(!wide.matches && !!summary && !!panel && summary.bottom < 0 && panel.top > window.innerHeight);
+    };
+    update();
+    window.addEventListener("scroll", update, { passive: true });
+    window.addEventListener("resize", update);
+    return () => {
+      window.removeEventListener("scroll", update);
+      window.removeEventListener("resize", update);
+    };
+  }, [hasPanel]);
+  const goToConfirm = () => {
+    document.getElementById("review-confirm")?.scrollIntoView({ behavior: "smooth", block: "end" });
+    document.getElementById("review-confirm-check")?.focus({ preventScroll: true });
+  };
   const canConfirm = editable && !!retailerId && checked && unresolved.length === 0 && includedCount > 0 && !!pricing?.orderable && !loading && !pending;
 
   const set = (id: string, patch: Partial<Decision>) => {
@@ -259,7 +283,7 @@ export function Review({ lang, d, shopT, message, capture, lines, catalogue, ord
           <EmptyState icon="inbox" title={d.noLines} />
         ) : (
           <>
-          <div className="flex flex-wrap items-center gap-2 rounded-lg border border-line bg-surface px-4 py-3 text-[14px]" aria-live="polite">
+          <div id="review-summary" className="flex flex-wrap items-center gap-2 rounded-lg border border-line bg-surface px-4 py-3 text-[14px]" aria-live="polite">
             <span className="font-semibold">{fill(d.sumLines, { n: lines.length })}</span>
             <Badge tone="accent">{fill(d.sumReady, { n: states.filter((x) => x.state === "ready").length })}</Badge>
             {attentionIds.length > 0 && <Badge tone="warn">{fill(d.sumAttention, { n: attentionIds.length })}</Badge>}
@@ -292,7 +316,7 @@ export function Review({ lang, d, shopT, message, capture, lines, catalogue, ord
         )}
 
         {editable && lines.length > 0 && (
-          <Card className="sticky z-10 space-y-3 p-4 shadow-pop" style={{ bottom: "calc(0.5rem + env(safe-area-inset-bottom, 0px))" }}>
+          <Card id="review-confirm" className="space-y-3 p-4 sm:sticky sm:z-10 sm:shadow-pop" style={{ bottom: "calc(0.5rem + env(safe-area-inset-bottom, 0px))" }}>
             {problem && <Notice tone="danger">{problem}</Notice>}
             {error && (
               <Notice tone="danger">
@@ -325,13 +349,31 @@ export function Review({ lang, d, shopT, message, capture, lines, catalogue, ord
             {unresolved.length > 0 && <p className="text-[14px] font-medium text-warn">{d.errUnresolved}</p>}
 
             <label className="flex items-start gap-3 rounded-md bg-sunken px-3 py-2.5 text-[15px]">
-              <input type="checkbox" checked={checked} onChange={(e) => setChecked(e.target.checked)} className="mt-1 h-5 w-5 accent-[var(--color-accent)]" />
+              <input id="review-confirm-check" type="checkbox" checked={checked} onChange={(e) => setChecked(e.target.checked)} className="mt-1 h-5 w-5 accent-[var(--color-accent)]" />
               <span>{d.confirmCheck}</span>
             </label>
             <Button size="lg" onClick={confirm} disabled={!canConfirm} aria-busy={pending}>
               {pending ? d.creating : pricing ? `${d.createOrder} · ${formatPaise(pricing.totals.totalPaise)}` : d.createOrder}
             </Button>
           </Card>
+        )}
+        {hasPanel && showBar && (
+          <div
+            className="fixed inset-x-0 bottom-0 z-20 flex items-center gap-3 border-t border-line bg-surface px-4 pt-2 shadow-pop sm:hidden"
+            style={{ paddingBottom: "calc(0.5rem + env(safe-area-inset-bottom, 0px))" }}
+          >
+            <span className="min-w-0 flex-1 text-[14px] leading-tight">
+              {pricing ? (
+                <>
+                  <span className="block text-ink-3">{shopT.total}</span>
+                  <span className="num block text-[16px] font-semibold">{formatPaise(pricing.totals.totalPaise)}</span>
+                </>
+              ) : (
+                <span className="text-ink-2">{fill(d.sumLines, { n: lines.length })}</span>
+              )}
+            </span>
+            <Button onClick={goToConfirm}>{d.toConfirm} ↓</Button>
+          </div>
         )}
         {message.status === "converted" && !order && <ButtonLink href="/desk/orders">{d.ordersTitle}</ButtonLink>}
       </div>
