@@ -48,3 +48,7 @@ next-env.d.ts
 
 # agent worktrees
 /.claude/worktrees/
+
+# e2e
+/data/e2e.db*
+/e2e-shots/

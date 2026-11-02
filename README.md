@@ -6,7 +6,7 @@ Retailer ordering app with AI order capture for an FMCG distributor in Jabalpur 
 - WhatsApp-style text orders become **draft** orders that the order desk checks and confirms.
 - The order desk handles credit holds and exports to Tally.
 
-See [docs/PLAN.md](docs/PLAN.md) for scope, architecture and assumptions.
+See [docs/BRIEF.md](docs/BRIEF.md) for the client brief and [docs/PLAN.md](docs/PLAN.md) for scope, architecture and assumptions.
 
 ## Quick start
 
@@ -31,9 +31,16 @@ Demo mode (`DEMO_MODE=true`) lists demo accounts on the sign-in screen and shows
 |---|---|
 | `npm run dev` / `build` / `start` | Next.js |
 | `npm run check` | typecheck + lint + tests |
+| `npm run e2e` | Browser smoke tests (needs `npm run build` first and a local Chrome/Edge, or `CHROME_PATH`). Uses its own `data/e2e.db`. |
 | `npm test` | Vitest unit and integration tests (in-memory SQLite) |
 | `npm run db:generate` | Generate a migration from `src/db/schema.ts` |
 | `npm run db:migrate` / `db:seed` / `db:reset` | Apply migrations / seed / both from scratch |
+
+## AI order capture
+
+Captured lines are always validated against the catalogue and confirmed by a person; the model never sees or sets prices, stock or schemes.
+The model is pluggable (`AI_PROVIDER`): Anthropic (`ANTHROPIC_API_KEY`) or any OpenAI-compatible endpoint (`AI_BASE_URL`, `AI_MODEL`, optional `AI_API_KEY`).
+With no provider configured, a deterministic rule-based matcher is used and the desk screen says so.
 
 ## Stack
 
