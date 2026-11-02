@@ -225,6 +225,104 @@ describe("Gemini failures never leak the key", () => {
   });
 });
 
+describe("bounded retry for transient errors (429 / 503 only)", () => {
+  /** fetch that answers with the given statuses in order (200 = a valid answer). */
+  function sequence(...steps: (number | { status: number; retryAfter?: string })[]) {
+    const queue = [...steps];
+    const fetchMock = vi.fn<typeof fetch>(async () => {
+      const step = queue.shift() ?? 500;
+      const { status, retryAfter } = typeof step === "number" ? { status: step, retryAfter: undefined } : step;
+      if (status === 200) return new Response(JSON.stringify(reply(JSON.stringify(OK_ANSWER))), { status });
+      return new Response(`{"error":{"message":"busy ${KEY}"}}`, { status, headers: retryAfter ? { "retry-after": retryAfter } : {} });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+  const fast = { retryDelayMs: 10, minRetryAttemptMs: 50 };
+
+  it.each([503, 429])("retries once after HTTP %i and succeeds", async (status) => {
+    const fetchMock = sequence(status, 200);
+    await expect(createGeminiModel(ENV, fast)!.propose(REQ)).resolves.toEqual(OK_ANSWER);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("gives up after one retry (never a third call)", async () => {
+    const fetchMock = sequence(503, 503, 200);
+    const err = (await createGeminiModel(ENV, fast)!.propose(REQ).catch((e: Error) => e)) as Error;
+    expect(err.message).toBe("Gemini returned HTTP 503");
+    expect(err.message).not.toContain(KEY);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([400, 401, 403, 404, 500, 502])("does not retry HTTP %i", async (status) => {
+    const fetchMock = sequence(status, 200);
+    await expect(createGeminiModel(ENV, fast)!.propose(REQ)).rejects.toThrow(`Gemini returned HTTP ${status}`);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not retry blocked, cut-off or malformed answers", async () => {
+    for (const payload of [{ promptFeedback: { blockReason: "SAFETY" } }, reply("{}", "MAX_TOKENS"), reply("not json")]) {
+      const fetchMock = stubFetch(payload);
+      await expect(createGeminiModel(ENV, fast)!.propose(REQ)).rejects.toBeInstanceOf(ModelOutputError);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    }
+  });
+
+  it("does not retry network failures", async () => {
+    const fetchMock = vi.fn(async () => Promise.reject(new TypeError("socket hang up")));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(createGeminiModel(ENV, fast)!.propose(REQ)).rejects.toThrow("Gemini request failed (network)");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("honours a short Retry-After and skips a long one", async () => {
+    const short = sequence({ status: 429, retryAfter: "0.05" }, 200);
+    await expect(createGeminiModel(ENV, { minRetryAttemptMs: 50 })!.propose(REQ)).resolves.toEqual(OK_ANSWER);
+    expect(short).toHaveBeenCalledTimes(2);
+
+    const long = sequence({ status: 429, retryAfter: "30" }, 200);
+    await expect(createGeminiModel(ENV, fast)!.propose(REQ)).rejects.toThrow("Gemini returned HTTP 429");
+    expect(long).toHaveBeenCalledTimes(1);
+  });
+
+  it("skips the retry when too little of the budget would remain", async () => {
+    const fetchMock = sequence(503, 200);
+    // 300 ms budget, 3 s minimum for a second attempt → no retry, immediate failure.
+    await expect(createGeminiModel(ENV, { timeoutMs: 300 })!.propose(REQ)).rejects.toThrow("Gemini returned HTTP 503");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the whole call, retry included, inside the timeout", async () => {
+    let calls = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((_url: string, init: RequestInit) => {
+        calls++;
+        if (calls === 1) return Promise.resolve(new Response("{}", { status: 503 }));
+        return new Promise<Response>((_, reject) => init.signal!.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError"))));
+      }),
+    );
+    const started = Date.now();
+    await expect(createGeminiModel(ENV, { timeoutMs: 200, retryDelayMs: 10, minRetryAttemptMs: 50 })!.propose(REQ)).rejects.toBeInstanceOf(ModelTimeoutError);
+    expect(Date.now() - started).toBeLessThan(1000);
+    expect(calls).toBe(2);
+  });
+
+  it("through captureOrder: a transient 503 is retried and the AI read still succeeds", async () => {
+    sequence(503, 200);
+    const res = await captureOrder(input("5 peti biscuit chhota"), { model: createGeminiModel(ENV, fast) });
+    expect(res).toMatchObject({ engine: "llm", fallbackReason: null });
+  });
+
+  it("through captureOrder: persistent 503s still end in the labelled rule-based fallback", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    sequence(503, 503);
+    const res = await captureOrder(input(BRIEF_MESSAGE), { model: createGeminiModel(ENV, fast) });
+    expect(res).toMatchObject({ engine: "rules", fallbackReason: "model_error" });
+    expect(res.lines.map((l) => l.skuId)).toEqual(["SKU-BS-075", "SKU-DT-1KG", "SKU-TE-250"]);
+  });
+});
+
 describe("provider selection", () => {
   it("selects Gemini explicitly or when only GEMINI_API_KEY is configured", () => {
     expect(createCaptureModel({ AI_PROVIDER: "gemini", ...ENV })?.name).toBe("gemini-3.8-flash");

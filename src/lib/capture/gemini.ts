@@ -133,11 +133,45 @@ export function readGeminiReply(data: GeminiResponse): unknown {
   }
 }
 
+/** HTTP statuses Google documents as temporary (rate limit / overloaded). Only these are retried. */
+const TRANSIENT_STATUS = new Set([429, 503]);
+/** Default pause before the single retry when Google sends no usable Retry-After. */
+const RETRY_DELAY_MS = 600;
+/** Never wait longer than this for a retry, whatever Retry-After says. */
+const MAX_RETRY_DELAY_MS = 2000;
+/** Retry only if at least this much of the budget would remain for the second attempt. */
+const MIN_RETRY_ATTEMPT_MS = 3000;
+
+/** Retry-After in seconds (the HTTP-date form is ignored); null when absent or unusable. */
+function retryAfterMs(res: Response): number | null {
+  const raw = res.headers.get("retry-after");
+  if (!raw || !/^\d+(\.\d+)?$/.test(raw.trim())) return null;
+  return Math.round(Number(raw) * 1000);
+}
+
+class HttpStatusError extends Error {}
+
+function sleep(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) return reject(new Error("aborted"));
+    const t = setTimeout(resolve, ms);
+    signal.addEventListener("abort", () => (clearTimeout(t), reject(new Error("aborted"))), { once: true });
+  });
+}
+
+export type GeminiOptions = {
+  /** Whole budget for one capture, retry included (default 12 s). */
+  timeoutMs?: number;
+  /** Tests only: shorten the retry pause / minimum remaining budget. */
+  retryDelayMs?: number;
+  minRetryAttemptMs?: number;
+};
+
 /**
  * Gemini-backed capture model, or null when GEMINI_API_KEY is not set or the
- * model id is not a plain id. `opts.timeoutMs` exists so tests need not wait 12 s.
+ * model id is not a plain id. `opts` exists so tests need not wait seconds.
  */
-export function createGeminiModel(env: Env = process.env, opts: { timeoutMs?: number } = {}): CaptureModel | null {
+export function createGeminiModel(env: Env = process.env, opts: GeminiOptions = {}): CaptureModel | null {
   const apiKey = env.GEMINI_API_KEY?.trim();
   if (!apiKey) return null;
   const model = env.GEMINI_MODEL?.trim() || GEMINI_DEFAULT_MODEL;
@@ -147,6 +181,8 @@ export function createGeminiModel(env: Env = process.env, opts: { timeoutMs?: nu
   }
   const level = thinkingLevel(env.GEMINI_THINKING_LEVEL);
   const timeoutMs = opts.timeoutMs ?? MODEL_TIMEOUT_MS;
+  const retryDelay = opts.retryDelayMs ?? RETRY_DELAY_MS;
+  const minRetryAttempt = opts.minRetryAttemptMs ?? MIN_RETRY_ATTEMPT_MS;
 
   return {
     name: model,
@@ -162,29 +198,46 @@ export function createGeminiModel(env: Env = process.env, opts: { timeoutMs?: nu
         },
       };
 
+      // One deadline for the whole call, retry included: the 12 s budget never grows.
+      const deadline = Date.now() + timeoutMs;
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), timeoutMs);
-      let data: GeminiResponse;
+      let data: GeminiResponse | undefined;
       try {
-        const res = await fetch(`${GEMINI_API_BASE}/models/${model}:generateContent`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
-          body: JSON.stringify(body),
-          signal: controller.signal,
-        });
-        // Status only: error bodies can echo request details.
-        if (!res.ok) throw new Error(`Gemini returned HTTP ${res.status}`);
-        data = (await res.json().catch(() => {
-          throw new ModelOutputError("Gemini returned a non-JSON response");
-        })) as GeminiResponse;
+        for (let attempt = 0; attempt < 2; attempt++) {
+          const res = await fetch(`${GEMINI_API_BASE}/models/${model}:generateContent`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
+            body: JSON.stringify(body),
+            signal: controller.signal,
+          });
+          if (res.ok) {
+            data = (await res.json().catch(() => {
+              throw new ModelOutputError("Gemini returned a non-JSON response");
+            })) as GeminiResponse;
+            break;
+          }
+          await res.body?.cancel().catch(() => {}); // free the connection; the body is never read
+          // At most one retry, only for documented-transient statuses, and only if the
+          // wait is short and enough budget remains for a real second attempt.
+          const wait = retryAfterMs(res) ?? retryDelay;
+          const left = deadline - Date.now() - wait;
+          if (attempt === 0 && TRANSIENT_STATUS.has(res.status) && wait <= MAX_RETRY_DELAY_MS && left >= minRetryAttempt) {
+            await sleep(wait, controller.signal);
+            continue;
+          }
+          // Status only: error bodies can echo request details.
+          throw new HttpStatusError(`Gemini returned HTTP ${res.status}`);
+        }
       } catch (error) {
         if (controller.signal.aborted) throw new ModelTimeoutError(`no Gemini answer in ${timeoutMs} ms`);
-        if (error instanceof ModelOutputError || (error instanceof Error && error.message.startsWith("Gemini returned HTTP"))) throw error;
+        if (error instanceof ModelOutputError || error instanceof HttpStatusError) throw error;
         // Network failures: never pass through a message that could contain request details.
         throw new Error("Gemini request failed (network)");
       } finally {
         clearTimeout(timer);
       }
+      if (!data) throw new ModelOutputError("Gemini returned no response");
       return readGeminiReply(data);
     },
   };
