@@ -4,6 +4,7 @@ import { Button, cx, EmptyState, PageHeader } from "@/components/ui";
 import { db } from "@/db";
 import { requireViewer } from "@/lib/auth/dal";
 import { formatDateTime } from "@/lib/dates";
+import { fill } from "@/lib/i18n/messages";
 import { getMessages } from "@/lib/i18n/server";
 import { formatPaise } from "@/lib/money";
 import { listDeskOrders, QUEUE_FILTERS, type QueueFilter } from "@/server/desk";
@@ -57,7 +58,28 @@ export default async function DeskOrders({ searchParams }: PageProps<"/desk/orde
       {rows.length === 0 ? (
         <EmptyState title={d.noOrdersTitle} body={d.noOrdersBody} />
       ) : (
-        <div className="overflow-x-auto rounded-lg border border-line bg-surface shadow-card">
+        <>
+        {/* Phones: one card per order, everything readable without sideways scrolling. */}
+        <ul className="divide-y divide-line overflow-hidden rounded-lg border border-line bg-surface shadow-card md:hidden">
+          {rows.map((o) => (
+            <li key={o.id}>
+              <Link href={`/desk/orders/${o.id}`} className="block px-4 py-3 hover:bg-sunken">
+                <p className="flex items-center justify-between gap-2">
+                  <span className="num font-semibold text-accent">{o.number}</span>
+                  <DeskStatusBadge d={d} status={o.status} />
+                </p>
+                <p className="mt-0.5 flex items-center justify-between gap-2 text-[15px]">
+                  <span className="min-w-0 truncate font-medium">{o.shopName}</span>
+                  <span className="num shrink-0 font-semibold">{formatPaise(o.totalPaise)}</span>
+                </p>
+                <p className="text-[13px] text-ink-3">
+                  {formatDateTime(o.createdAt, lang)} · {fill(t.shop.itemsCases, { items: o.lineCount, cases: o.cases })} · {d.source[o.source]}
+                </p>
+              </Link>
+            </li>
+          ))}
+        </ul>
+        <div className="hidden overflow-x-auto rounded-lg border border-line bg-surface shadow-card md:block">
           <table className="w-full min-w-[720px] text-left text-[15px]">
             <thead className="border-b border-line text-[13px] text-ink-3">
               <tr>
@@ -97,6 +119,7 @@ export default async function DeskOrders({ searchParams }: PageProps<"/desk/orde
             </tbody>
           </table>
         </div>
+        </>
       )}
     </>
   );
