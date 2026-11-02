@@ -110,6 +110,9 @@ export async function captureOrder(input: CaptureInput, opts: CaptureOptions = {
     const lines = mergeModelOutput(raw, segments, request, ctx);
     return { engine: "llm", model: model.name, fallbackReason: null, lines, ignoredText };
   } catch (error) {
-    return rules(fallbackReason(error));
+    const reason = fallbackReason(error);
+    // Never silent: the desk sees "rule-based" in the UI, and the server log keeps the cause.
+    console.warn(`[capture] model fallback (${reason}):`, error instanceof Error ? error.message : error);
+    return rules(reason);
   }
 }
