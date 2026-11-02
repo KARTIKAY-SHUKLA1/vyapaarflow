@@ -37,6 +37,7 @@ export function Catalogue({
   ownerName,
   availablePaise,
   lastOrder,
+  usual,
 }: {
   items: CatalogueCard[];
   t: T;
@@ -44,6 +45,8 @@ export function Catalogue({
   ownerName: string;
   availablePaise: number;
   lastOrder: { number: string; lines: CartLine[] } | null;
+  /** The shop's usual items (from its own past orders) with its usual case quantity. */
+  usual: { skuId: string; cases: number }[];
 }) {
   const router = useRouter();
   const cart = useCart();
@@ -56,6 +59,9 @@ export function Catalogue({
     const words = deferredQuery.toLowerCase().split(/\s+/).filter(Boolean);
     return items.filter((i) => (!category || i.category === category) && words.every((w) => i.searchText.includes(w)));
   }, [items, category, deferredQuery]);
+
+  const byId = useMemo(() => new Map(items.map((i) => [i.id, i])), [items]);
+  const showUsual = usual.length > 0 && !category && !deferredQuery.trim();
 
   if (items.length === 0) return <EmptyState title={t.emptyCatalogueTitle} body={t.emptyCatalogueBody} />;
 
@@ -78,7 +84,7 @@ export function Catalogue({
           >
             <span className="flex flex-col items-start leading-tight">
               <span>{t.repeatLast}</span>
-              <span className="text-[12px] font-normal text-ink-3">{fill(t.repeatLastHint, { number: lastOrder.number, n: lastOrder.lines.length })}</span>
+              <span className="text-[13px] font-normal text-ink-3">{fill(t.repeatLastHint, { number: lastOrder.number, n: lastOrder.lines.length })}</span>
             </span>
           </Button>
         )}
@@ -126,16 +132,78 @@ export function Catalogue({
           }
         />
       ) : (
-        <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {visible.map((item) => (
-            <ProductCard key={item.id} item={item} t={t} common={common} />
-          ))}
-        </ul>
+        <>
+          {showUsual && (
+            <section aria-labelledby="usual-title" className="mb-5">
+              <h2 id="usual-title" className="text-[17px] font-semibold">
+                {t.usualTitle}
+              </h2>
+              <p className="text-[14px] text-ink-2">{t.usualHint}</p>
+              <ul className="-mx-4 mt-2 flex snap-x gap-3 overflow-x-auto px-4 pb-2">
+                {[...usual].sort((a, b) => Number(byId.get(a.skuId)?.stockStatus === "out") - Number(byId.get(b.skuId)?.stockStatus === "out")).map((u) => {
+                  const item = byId.get(u.skuId);
+                  return item ? <UsualTile key={u.skuId} item={item} usualCases={u.cases} t={t} /> : null;
+                })}
+              </ul>
+            </section>
+          )}
+          {showUsual && <h2 className="mb-2 text-[17px] font-semibold">{t.allProducts}</h2>}
+          <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {visible.map((item) => (
+              <ProductCard key={item.id} item={item} t={t} common={common} />
+            ))}
+          </ul>
+        </>
       )}
     </>
   );
 }
 
+/** Small gift mark so a scheme reads as an offer at a glance (inline SVG, no request). */
+function SchemeBadge({ text }: { text: string }) {
+  return (
+    <Badge tone="scheme" className="font-semibold">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <path d="M20 12v9H4v-9M2 7h20v5H2zM12 21V7M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7zM12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z" />
+      </svg>
+      {text}
+    </Badge>
+  );
+}
+
+/** One usual item: what the shop normally buys, added in one tap at its usual quantity. */
+function UsualTile({ item, usualCases, t }: { item: CatalogueCard; usualCases: number; t: T }) {
+  const cart = useCart();
+  const inCart = cart.casesOf(item.id);
+  const out = item.stockStatus === "out";
+  const cases = Math.max(1, Math.min(usualCases, item.stockCases));
+  return (
+    <li className={cx("flex w-44 shrink-0 snap-start flex-col rounded-lg border border-line bg-surface p-3 shadow-card", out && "opacity-75")}>
+      <Link href={`/shop/p/${item.code}`} className="flex items-start gap-2">
+        <ProductImage imageKey={item.imageKey} label={item.sizeLabel} size="sm" alt="" />
+        <span className="line-clamp-3 text-[14px] leading-snug font-semibold">{item.name}</span>
+      </Link>
+      <p className="num mt-2 text-[13px] text-ink-2">{fill(t.usualQty, { n: usualCases })}</p>
+      <div className="mt-auto pt-2">
+        {out ? (
+          <Button variant="secondary" disabled className="w-full">
+            {t.outOfStock}
+          </Button>
+        ) : inCart > 0 ? (
+          <Button variant="secondary" onClick={() => cart.setCases(item.id, inCart + cases)} className="w-full">
+            {fill(t.inCart, { n: inCart })} · +{cases}
+          </Button>
+        ) : (
+          <Button onClick={() => cart.setCases(item.id, cases)} className="w-full">
+            {fill(t.addUsual, { n: cases })}
+          </Button>
+        )}
+      </div>
+    </li>
+  );
+}
+
+/** Compact card: about twice as many products per phone screen; the action sits beside the price. */
 function ProductCard({ item, t, common }: { item: CatalogueCard; t: T; common: Messages["common"] }) {
   const cart = useCart();
   const inCart = cart.casesOf(item.id);
@@ -148,33 +216,37 @@ function ProductCard({ item, t, common }: { item: CatalogueCard; t: T; common: M
         <ProductImage imageKey={item.imageKey} label={item.sizeLabel} size="md" alt="" />
       </Link>
       <div className="flex min-w-0 flex-1 flex-col">
-        <Link href={`/shop/p/${item.code}`} className="text-[15px] leading-snug font-semibold hover:underline">
+        <Link href={`/shop/p/${item.code}`} className="line-clamp-2 text-[15px] leading-snug font-semibold hover:underline">
           {item.name}
         </Link>
         <div className="mt-1 flex flex-wrap gap-1.5">
           <StockBadge t={t} status={item.stockStatus} cases={item.stockCases} />
-          {item.scheme && <Badge tone="scheme">{item.scheme}</Badge>}
+          {item.scheme && <SchemeBadge text={item.scheme} />}
         </div>
-        <p className="mt-1.5">
-          <span className="num text-[17px] font-semibold">{formatPaise(item.casePricePaise)}</span>{" "}
-          <span className="text-[13px] text-ink-2">
-            {t.perCase} · {common.exclGst}
-          </span>
+        <p className="num mt-1 text-[13px] text-ink-3">
+          {fill(t.perPiece, { price: formatPaise(item.pricePerPiecePaise) })} · {fill(t.caseOf, { n: item.packSize })}
         </p>
-        <p className="num text-[13px] text-ink-3">{fill(t.perPiece, { price: formatPaise(item.pricePerPiecePaise) })} · {fill(t.caseOf, { n: item.packSize })}</p>
-        <div className="mt-2">
+        <div className="mt-auto flex items-end justify-between gap-2 pt-1">
+          <div className="min-w-0">
+            <p className="leading-tight whitespace-nowrap">
+              <span className="num text-[17px] font-semibold">{formatPaise(item.casePricePaise)}</span>{" "}
+              <span className="text-[13px] text-ink-2">{t.perCase}</span>
+            </p>
+            <p className="text-[13px] text-ink-3">{common.exclGst}</p>
+          </div>
           {out ? (
-            <Button variant="secondary" disabled className="w-full sm:w-auto">
-              {t.outOfStock}
+            <span className="shrink-0 pb-1 text-[14px] font-medium text-ink-3">{t.outOfStock}</span>
+          ) : inCart === 0 ? (
+            <Button onClick={() => cart.setCases(item.id, 1)} className="shrink-0 px-5" aria-label={`${t.add}: ${item.name}`}>
+              + {t.add}
             </Button>
-          ) : inCart > 0 ? (
-            <Stepper value={inCart} max={item.stockCases} onChange={(n) => cart.setCases(item.id, n)} labels={labels} />
-          ) : (
-            <Button onClick={() => cart.setCases(item.id, 1)} className="w-full sm:w-auto sm:px-6">
-              {t.add}
-            </Button>
-          )}
+          ) : null}
         </div>
+        {!out && inCart > 0 && (
+          <div className="mt-2">
+            <Stepper value={inCart} max={item.stockCases} onChange={(n) => cart.setCases(item.id, n)} labels={labels} />
+          </div>
+        )}
       </div>
     </li>
   );

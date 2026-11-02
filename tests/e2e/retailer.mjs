@@ -1,5 +1,8 @@
 // Retailer: OTP login → browse/search → prices & schemes → cart → checkout → orders → repeat order.
-import { BASE, Checks, click, clickVisible, login, mainText, newPage, settle, shot, typeInto } from "./lib.mjs";
+import { createClient } from "@libsql/client";
+import { BASE, Checks, click, clickVisible, login, mainText, newPage, settle, shot, typeInto, waitVisible } from "./lib.mjs";
+
+const db = process.env.E2E_BASE_URL ? null : createClient({ url: "file:./data/e2e.db" });
 
 export default async function retailer(browser) {
   const c = new Checks("retailer");
@@ -13,15 +16,17 @@ export default async function retailer(browser) {
   let t = await mainText(page);
   c.ok("brief SKUs listed", ["Glucose biscuit 75 g", "Detergent powder 1 kg", "Tea leaf 250 g"].every((s) => t.includes(s)));
   c.ok("brief schemes shown", t.includes("Buy 10 cases get 1 free") && t.includes("3% off 5 or more cases"));
-  c.ok("every price says excl. GST", t.includes("/ case · excl. GST"));
+  const cardTexts = await page.$$eval("main section + h2 + ul > li, main ul.grid > li", (lis) => lis.map((li) => li.innerText));
+  c.ok("every product card says excl. GST", cardTexts.length >= 20 && cardTexts.every((x) => x.includes("excl. GST")), `${cardTexts.length} cards`);
   c.ok("available credit shown", /Available credit: ₹1,07,500\.00/.test(t));
+  c.ok("usual items shown first, from past orders", t.indexOf("Your usual items") >= 0 && t.indexOf("Your usual items") < t.indexOf("All products"));
 
   // Search
   await page.type("#catalogue-search", "glucose 75");
   await settle(300);
   const found = await page.$$eval("main ul > li a[href^='/shop/p/']", (as) => [...new Set(as.map((a) => a.getAttribute("href")))]);
   c.eq("search 'glucose 75' finds only the 75 g pack", found.join(","), "/shop/p/SKU-BS-075");
-  await click(page, "::-p-xpath(//main//li//button[normalize-space(.)='Add'])");
+  await click(page, "::-p-xpath(//main//li//button[normalize-space(.)='+ Add'])");
   await typeInto(page, 'main input[aria-label="Cases"]', "5");
   await page.keyboard.press("Enter");
   await settle(300);
@@ -30,7 +35,8 @@ export default async function retailer(browser) {
   await page.$eval("#catalogue-search", (e) => (e.value = ""));
   await typeInto(page, "#catalogue-search", "tea leaf 250");
   await settle(300);
-  c.ok("out-of-stock tea cannot be added", await page.$eval("main ul > li button", (b) => b.disabled && b.textContent === "Out of stock"));
+  const teaCard = await page.$eval("main ul > li", (li) => ({ text: li.innerText, buttons: li.querySelectorAll("button").length }));
+  c.ok("out-of-stock tea is shown but cannot be added", teaCard.text.includes("Out of stock") && teaCard.buttons === 0, JSON.stringify(teaCard));
 
   // Category filter
   await page.$eval("#catalogue-search", (e) => (e.value = ""));
@@ -47,7 +53,7 @@ export default async function retailer(browser) {
   await settle(1200);
   await shot(page, "r02-product");
   t = await mainText(page);
-  c.ok("product preview priced by server with nudge", t.includes("₹4,790.80") && t.includes("Add 3 more for 3% off"));
+  c.ok("product preview priced by server with scheme progress", t.includes("₹4,790.80") && t.includes("2 of 5 cases · 3% off at 5"));
   await click(page, "::-p-text(Add to cart)");
   await settle(300);
 
@@ -71,12 +77,32 @@ export default async function retailer(browser) {
   c.ok("quantity update re-prices (3 detergent: ₹7,186.20 line, nudge 'Add 2 more')", t.includes("Add 2 more for 3% off"));
   await shot(page, "r03-cart");
 
+  // A line that went out of stock after it was added: shown first, explained, and blocking.
+  if (db) {
+    const ids = (await db.execute("select (select retailer_id from users where phone = '919000000001') as r, (select id from skus where code = 'SKU-TE-250') as tea")).rows[0];
+    await page.evaluate((key, tea) => {
+      const lines = JSON.parse(localStorage.getItem(key) ?? "[]");
+      localStorage.setItem(key, JSON.stringify([...lines, { skuId: tea, cases: 1 }]));
+    }, `vf_cart_${ids.r}`, String(ids.tea));
+    await page.goto(`${BASE}/shop/cart`, { waitUntil: "networkidle0" });
+    await page.waitForSelector("::-p-text(1 item needs attention before you can order.)", { timeout: 10000 }).catch(() => {});
+    t = await mainText(page);
+    const firstLine = await page.$eval("main ul > li", (li) => li.innerText);
+    c.ok("problem line explained and listed first", t.includes("1 item needs attention before you can order.") && firstLine.includes("Tea leaf 250 g"));
+    const fix = await page.$("::-p-text(Fix 1 item to continue)");
+    c.ok("sticky bar says why it can't continue", !!fix && !!(await fix.boundingBox()));
+    await click(page, "::-p-xpath(//main//ul/li[contains(., 'Tea leaf 250 g')]//button[normalize-space(.)='Remove'])");
+    await page.waitForFunction(() => !document.querySelector("main")?.innerText.includes("needs attention"), { timeout: 10000 });
+    await settle(1200);
+    c.ok("removing it unblocks review", !(await mainText(page)).includes("Tea leaf 250 g"));
+  }
+
   // Checkout
   await clickVisible(page, "::-p-text(Review order)");
   await page.waitForFunction(() => location.pathname === "/shop/checkout");
   await settle(1400);
   await page.type("textarea", "Deliver before 10 am please");
-  const place = await page.waitForSelector("::-p-text(Place order ·)");
+  const place = await waitVisible(page, "::-p-text(Place order ·)");
   const placeLabel = await place.evaluate((b) => b.textContent);
   // 10 biscuit (₹8,164.80) + 3 detergent (₹7,186.20)
   c.eq("place-order button shows server total", placeLabel, "Place order · ₹15,351.00");
@@ -133,7 +159,7 @@ export default async function retailer(browser) {
   await gupta.goto(`${BASE}/shop/checkout`, { waitUntil: "networkidle0" });
   await settle(1400);
   c.ok("credit warning before placing", /over your available credit/.test(await mainText(gupta)));
-  const gPlace = await gupta.waitForSelector("::-p-text(Place order ·)");
+  const gPlace = await waitVisible(gupta, "::-p-text(Place order ·)");
   await gPlace.evaluate((e) => e.scrollIntoView({ block: "center" }));
   await Promise.all([gupta.waitForFunction(() => location.pathname.startsWith("/shop/orders/"), { timeout: 20000 }), gPlace.click()]);
   await settle(600);
@@ -145,6 +171,7 @@ export default async function retailer(browser) {
   await fresh.goto(`${BASE}/shop/cart`, { waitUntil: "networkidle0" });
   c.ok("empty cart state", (await mainText(fresh)).includes("Your cart is empty"));
 
+  db?.close();
   for (const p of [page, gupta, fresh]) c.ok(`no console errors (${p === page ? "sharma" : p === gupta ? "gupta" : "saraswati"})`, p.consoleErrors.length === 0, p.consoleErrors.join(" | "));
   return c;
 }

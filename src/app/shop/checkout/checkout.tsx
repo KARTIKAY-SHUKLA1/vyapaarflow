@@ -115,7 +115,7 @@ export function Checkout({ t, common, lang }: { t: T; common: Messages["common"]
                   </div>
                   <div className="shrink-0 text-right">
                     <p className="num font-medium">{formatPaise(l.totalPaise)}</p>
-                    <p className="text-[12px] text-ink-3">{common.inclGst}</p>
+                    <p className="text-[13px] text-ink-3">{common.inclGst}</p>
                   </div>
                 </li>
               ))}
@@ -137,9 +137,20 @@ export function Checkout({ t, common, lang }: { t: T; common: Messages["common"]
           <div className="space-y-3 lg:sticky lg:top-20">
             <OrderSummary pricing={pricing} t={t} dim={loading} />
             <CreditNotice pricing={pricing} t={t} />
-            <Button size="lg" onClick={submit} disabled={busy || loading || !pricing.orderable} aria-busy={busy}>
-              {busy ? t.placing : `${t.placeOrder} · ${formatPaise(pricing.totals.totalPaise)}`}
-            </Button>
+            <div className="hidden sm:block">
+              <Button size="lg" onClick={submit} disabled={busy || loading || !pricing.orderable} aria-busy={busy}>
+                {busy ? t.placing : `${t.placeOrder} · ${formatPaise(pricing.totals.totalPaise)}`}
+              </Button>
+            </div>
+          </div>
+
+          {/* Phone: the one action of this screen stays in reach (the bottom nav is hidden here). */}
+          <div className="fixed inset-x-0 bottom-0 z-20 border-t border-line bg-surface px-4 pt-3 sm:hidden" style={{ paddingBottom: "calc(0.75rem + env(safe-area-inset-bottom, 0px))" }}>
+            <div className="mx-auto max-w-md">
+              <Button size="lg" onClick={submit} disabled={busy || loading || !pricing.orderable} aria-busy={busy}>
+                {busy ? t.placing : `${t.placeOrder} · ${formatPaise(pricing.totals.totalPaise)}`}
+              </Button>
+            </div>
           </div>
         </div>
       )}

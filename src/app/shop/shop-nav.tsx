@@ -33,7 +33,7 @@ function Icon({ d }: { d: string }) {
 function CountBadge({ n }: { n: number }) {
   if (!n) return null;
   return (
-    <span className="num absolute -top-1.5 left-3.5 min-w-5 rounded-full bg-accent px-1.5 text-center text-[11px] font-semibold leading-5 text-accent-ink">
+    <span className="num absolute -top-1.5 left-3.5 min-w-5 rounded-full bg-accent px-1.5 text-center text-[12px] font-semibold leading-5 text-accent-ink">
       {n}
     </span>
   );
@@ -68,6 +68,8 @@ export function ShopTabs({ t }: { t: Messages["shop"]["nav"] }) {
 /** Phone: fixed bottom bar with large targets, clear of the home indicator. */
 export function ShopBottomNav({ t }: { t: Messages["shop"]["nav"] }) {
   const items = useItems(t);
+  // Checkout has its own pinned "Place order" bar; no tab bar to tap away from it by mistake.
+  if (usePathname() === "/shop/checkout") return null;
   return (
     <nav
       aria-label="Shop"
@@ -80,7 +82,7 @@ export function ShopBottomNav({ t }: { t: Messages["shop"]["nav"] }) {
             <Link
               href={i.href}
               aria-current={i.active ? "page" : undefined}
-              className={cx("flex h-full flex-col items-center justify-center gap-0.5 text-[12px] font-medium", i.active ? "text-accent" : "text-ink-3")}
+              className={cx("flex h-full flex-col items-center justify-center gap-0.5 text-[13px] font-medium", i.active ? "text-accent" : "text-ink-3")}
             >
               <span className="relative">
                 <Icon d={i.icon} />

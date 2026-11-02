@@ -81,7 +81,7 @@ export default async function OrderPage({ params, searchParams }: PageProps<"/sh
                 </div>
                 <div className="shrink-0 text-right">
                   <p className="num font-medium">{formatPaise(l.totalPaise)}</p>
-                  <p className="text-[12px] text-ink-3">{t.common.inclGst}</p>
+                  <p className="text-[13px] text-ink-3">{t.common.inclGst}</p>
                 </div>
               </li>
             ))}

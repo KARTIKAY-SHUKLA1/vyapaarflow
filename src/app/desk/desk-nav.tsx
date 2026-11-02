@@ -27,7 +27,7 @@ export function DeskNav({ t, inboxCount }: { t: Messages["desk"]["nav"]; inboxCo
               )}
             >
               {i.label}
-              {!!i.badge && <span className="num rounded-full bg-accent px-2 text-[12px] leading-5 font-semibold text-accent-ink">{i.badge}</span>}
+              {!!i.badge && <span className="num rounded-full bg-accent px-2 text-[13px] leading-5 font-semibold text-accent-ink">{i.badge}</span>}
             </Link>
           </li>
         ))}

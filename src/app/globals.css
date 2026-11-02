@@ -18,7 +18,7 @@
 
   --color-ink: #1d1c19;
   --color-ink-2: #55534c;
-  --color-ink-3: #85827a;
+  --color-ink-3: #6b675f; /* ≥4.85:1 on every background (WCAG AA); was #85827a at 3.3–3.8:1 */
 
   --color-accent: #1f5d46;
   --color-accent-hover: #184a38;

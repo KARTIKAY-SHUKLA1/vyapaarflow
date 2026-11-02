@@ -21,6 +21,13 @@ export function CartView({ t, common, lang }: { t: T; common: Messages["common"]
   const cart = useCart();
   const { pricing, loading, error, retry } = usePricing(cart.lines, priceCartAction);
   const [removedCount, setRemovedCount] = useState(0);
+  // Lines that block the order go first (display order only; pricing is unchanged).
+  const orderedLines = pricing ? [...pricing.lines.filter((l) => !l.orderable), ...pricing.lines.filter((l) => l.orderable)] : [];
+  const problemCount = orderedLines.filter((l) => !l.orderable).length;
+  const showFirstProblem = () => {
+    const first = orderedLines.find((l) => !l.orderable);
+    if (first) document.getElementById(`cart-line-${first.skuId}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+  };
 
   // SKUs the server no longer sells to this shop are dropped from the cart, with a notice.
   useEffect(() => {
@@ -73,11 +80,18 @@ export function CartView({ t, common, lang }: { t: T; common: Messages["common"]
         </div>
       ) : (
         <div className="grid gap-5 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] lg:items-start">
-          <ul className={cx("space-y-3 transition-opacity", loading && "opacity-60")}>
-            {pricing.lines.map((line) => (
-              <CartRow key={line.skuId} line={line} t={t} lang={lang} common={common} />
-            ))}
-          </ul>
+          <div className="space-y-3">
+            {problemCount > 0 && !loading && (
+              <Notice tone="danger">
+                <span className="font-medium">{problemCount === 1 ? t.attentionOne : fill(t.attention, { n: problemCount })}</span>
+              </Notice>
+            )}
+            <ul className={cx("space-y-3 transition-opacity", loading && "opacity-60")}>
+              {orderedLines.map((line) => (
+                <CartRow key={line.skuId} line={line} t={t} lang={lang} common={common} />
+              ))}
+            </ul>
+          </div>
 
           <div className="space-y-3 lg:sticky lg:top-20">
             <OrderSummary pricing={pricing} t={t} dim={loading} />
@@ -102,16 +116,23 @@ export function CartView({ t, common, lang }: { t: T; common: Messages["common"]
           >
             <div className="mx-auto flex max-w-md items-center justify-between gap-3">
               <div>
-                <p className="text-[12px] text-ink-3">{t.total}</p>
+                <p className="text-[13px] text-ink-3">{t.total}</p>
                 <p className={cx("num text-[18px] font-semibold", loading && "opacity-60")}>{formatPaise(pricing.totals.totalPaise)}</p>
               </div>
-              <ButtonLink
-                href="/shop/checkout"
-                aria-disabled={!pricing.orderable || loading}
-                className={cx("px-6", (!pricing.orderable || loading) && "pointer-events-none opacity-50")}
-              >
-                {t.review}
-              </ButtonLink>
+              {problemCount > 0 && !loading ? (
+                // Say why the order can't go ahead, and take the retailer to the line.
+                <Button variant="danger" onClick={showFirstProblem} className="px-4">
+                  {problemCount === 1 ? t.fixToContinueOne : fill(t.fixToContinue, { n: problemCount })}
+                </Button>
+              ) : (
+                <ButtonLink
+                  href="/shop/checkout"
+                  aria-disabled={!pricing.orderable || loading}
+                  className={cx("px-6", (!pricing.orderable || loading) && "pointer-events-none opacity-50")}
+                >
+                  {t.review}
+                </ButtonLink>
+              )}
             </div>
           </div>
         </div>
@@ -128,7 +149,10 @@ function CartRow({ line, t, lang, common }: { line: PricedCartLine; t: T; lang: 
   const exceeds = line.issues.includes("EXCEEDS_STOCK");
 
   return (
-    <li className={cx("rounded-lg border bg-surface p-3 shadow-card", line.orderable ? "border-line" : "border-danger/40")}>
+    <li
+      id={`cart-line-${line.skuId}`}
+      className={cx("scroll-mt-32 rounded-lg border bg-surface p-3 shadow-card", line.orderable ? "border-line" : "border-2 border-danger/60")}
+    >
       <div className="flex gap-3">
         <Link href={`/shop/p/${line.item.code}`} className="shrink-0">
           <ProductImage imageKey={line.item.imageKey} label={sizeLabel(line.item.name)} size="sm" alt="" />
@@ -138,9 +162,11 @@ function CartRow({ line, t, lang, common }: { line: PricedCartLine; t: T; lang: 
             <Link href={`/shop/p/${line.item.code}`} className="text-[15px] leading-snug font-semibold hover:underline">
               {name}
             </Link>
-            <button type="button" onClick={() => cart.remove(line.skuId)} className="-mt-1 -mr-1 h-9 shrink-0 rounded-md px-2 text-[14px] text-ink-3 hover:bg-sunken hover:text-danger">
-              {t.remove}
-            </button>
+            {!out && (
+              <button type="button" onClick={() => cart.remove(line.skuId)} className="-mt-1 -mr-1 h-9 shrink-0 rounded-md px-2 text-[14px] text-ink-3 hover:bg-sunken hover:text-danger">
+                {t.remove}
+              </button>
+            )}
           </div>
           <p className="num text-[13px] text-ink-3">
             {formatPaise(line.casePricePaise)} {t.perCase} · {common.exclGst} · {t.gst} {formatBp(line.gstRateBp)}
@@ -155,7 +181,7 @@ function CartRow({ line, t, lang, common }: { line: PricedCartLine; t: T; lang: 
             />
             <div className="text-right">
               <p className="num font-semibold">{formatPaise(line.taxablePaise)}</p>
-              <p className="text-[12px] text-ink-3">{common.exclGst}</p>
+              <p className="text-[13px] text-ink-3">{common.exclGst}</p>
             </div>
           </div>
 
@@ -181,7 +207,14 @@ function CartRow({ line, t, lang, common }: { line: PricedCartLine; t: T; lang: 
             </div>
           )}
 
-          {out && <p className="mt-2 text-[14px] text-danger">{t.issueOutOfStock}</p>}
+          {out && (
+            <p className="mt-2 flex flex-wrap items-center gap-2 text-[14px] text-danger">
+              {t.issueOutOfStock}
+              <button type="button" onClick={() => cart.remove(line.skuId)} className="h-9 rounded-md border border-danger/40 px-3 font-medium hover:bg-danger-soft">
+                {t.remove}
+              </button>
+            </p>
+          )}
           {exceeds && (
             <p className="mt-2 flex flex-wrap items-center gap-2 text-[14px] text-danger">
               {fill(t.issueExceeds, { max: line.maxOrderableCases })}

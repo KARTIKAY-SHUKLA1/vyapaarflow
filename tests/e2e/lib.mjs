@@ -82,6 +82,16 @@ export async function clickVisible(page, selector) {
   throw new Error(`No visible element for ${selector}`);
 }
 
+/** Wait until some element matching the selector is visible (phone and desktop variants can both exist). */
+export async function waitVisible(page, selector, { timeout = 15000 } = {}) {
+  const until = Date.now() + timeout;
+  while (Date.now() < until) {
+    for (const el of await page.$$(selector)) if (await el.boundingBox()) return el;
+    await new Promise((r) => setTimeout(r, 150));
+  }
+  throw new Error(`No visible element for ${selector}`);
+}
+
 export async function typeInto(page, selector, value) {
   const el = await page.waitForSelector(selector, { visible: true });
   await el.evaluate((e) => e.scrollIntoView({ block: "center" }));

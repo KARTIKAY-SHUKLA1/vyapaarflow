@@ -38,7 +38,7 @@ export default async function OrdersPage() {
                 </div>
                 <div className="shrink-0 text-right">
                   <p className="num font-semibold">{formatPaise(o.totalPaise)}</p>
-                  <p className="text-[12px] text-ink-3">{t.common.inclGst}</p>
+                  <p className="text-[13px] text-ink-3">{t.common.inclGst}</p>
                 </div>
               </Link>
             </li>
