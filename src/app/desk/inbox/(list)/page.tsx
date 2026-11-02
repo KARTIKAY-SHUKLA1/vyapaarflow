@@ -16,6 +16,11 @@ import { PasteMessage } from "./paste-message";
 
 export const metadata: Metadata = { title: "AI inbox" };
 
+// Server actions take their time limit from the page they are invoked on (Next.js
+// maxDuration docs). AI capture can use its whole 12 s model budget plus database
+// writes, so allow 30 s here; other desk pages keep the platform default.
+export const maxDuration = 30;
+
 const STATUS_TONE = { new: "info", captured: "warn", converted: "accent", dismissed: "neutral" } as const;
 /** Left stripe colour per status, so the list can be scanned without reading badges. */
 const STRIPE = { new: "border-l-info", captured: "border-l-warn", converted: "border-l-accent", dismissed: "border-l-line-strong" } as const;

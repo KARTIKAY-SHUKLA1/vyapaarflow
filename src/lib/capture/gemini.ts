@@ -29,8 +29,11 @@ import {
  */
 
 export const GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta";
-/** Stable Flash model recommended by Google for new projects (verified Nov 2026). */
-export const GEMINI_DEFAULT_MODEL = "gemini-3.8-flash";
+/**
+ * Default model. gemini-3.5-flash-lite answered inside the 12 s budget in live testing,
+ * where gemini-3.8-flash was often overloaded (503) or slow. GEMINI_MODEL overrides it.
+ */
+export const GEMINI_DEFAULT_MODEL = "gemini-3.5-flash-lite";
 export const GEMINI_THINKING_LEVELS = ["MINIMAL", "LOW", "MEDIUM", "HIGH"] as const;
 type ThinkingLevel = (typeof GEMINI_THINKING_LEVELS)[number];
 /** Short extraction: little reasoning keeps answers well inside the 12 s budget. */

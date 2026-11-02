@@ -88,10 +88,11 @@ describe("createGeminiModel configuration", () => {
     expect(createGeminiModel({ GEMINI_API_KEY: "  " })).toBeNull();
   });
 
-  it("defaults to the verified stable Flash model and accepts an override", () => {
+  it("defaults to gemini-3.5-flash-lite and keeps an explicit GEMINI_MODEL override", () => {
     expect(createGeminiModel(ENV)?.name).toBe(GEMINI_DEFAULT_MODEL);
-    expect(GEMINI_DEFAULT_MODEL).toBe("gemini-3.8-flash");
-    expect(createGeminiModel({ ...ENV, GEMINI_MODEL: "gemini-3.5-flash-lite" })?.name).toBe("gemini-3.5-flash-lite");
+    expect(GEMINI_DEFAULT_MODEL).toBe("gemini-3.5-flash-lite");
+    expect(createGeminiModel({ ...ENV, GEMINI_MODEL: "gemini-3.8-flash" })?.name).toBe("gemini-3.8-flash");
+    expect(createGeminiModel({ ...ENV, GEMINI_MODEL: "  " })?.name).toBe("gemini-3.5-flash-lite"); // blank → default
   });
 
   it("rejects model ids that could alter the URL path", () => {
@@ -122,7 +123,7 @@ describe("Gemini request", () => {
     await createGeminiModel(ENV)!.propose(REQ);
     const { url, init, body } = call(fetchMock);
 
-    expect(url).toBe("https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent");
+    expect(url).toBe("https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent");
     expect(url).not.toContain(KEY);
     expect(init.method).toBe("POST");
     expect((init.headers as Record<string, string>)["x-goog-api-key"]).toBe(KEY);
@@ -325,14 +326,14 @@ describe("bounded retry for transient errors (429 / 503 only)", () => {
 
 describe("provider selection", () => {
   it("selects Gemini explicitly or when only GEMINI_API_KEY is configured", () => {
-    expect(createCaptureModel({ AI_PROVIDER: "gemini", ...ENV })?.name).toBe("gemini-3.8-flash");
-    expect(createCaptureModel({ ...ENV })?.name).toBe("gemini-3.8-flash");
+    expect(createCaptureModel({ AI_PROVIDER: "gemini", ...ENV })?.name).toBe("gemini-3.5-flash-lite");
+    expect(createCaptureModel({ ...ENV })?.name).toBe("gemini-3.5-flash-lite");
     expect(createCaptureModel({ AI_PROVIDER: "gemini" })).toBeNull(); // no key → rules
   });
 
   it("keeps Anthropic first when both keys are set, and honours explicit choices", () => {
     expect(createCaptureModel({ ANTHROPIC_API_KEY: "a", ...ENV })?.name).not.toMatch(/^gemini/);
-    expect(createCaptureModel({ AI_PROVIDER: "gemini", ANTHROPIC_API_KEY: "a", ...ENV })?.name).toBe("gemini-3.8-flash");
+    expect(createCaptureModel({ AI_PROVIDER: "gemini", ANTHROPIC_API_KEY: "a", ...ENV })?.name).toBe("gemini-3.5-flash-lite");
     expect(createCaptureModel({ AI_PROVIDER: "none", ...ENV })).toBeNull();
     expect(createCaptureModel({ AI_PROVIDER: "openai-compatible", ...ENV })).toBeNull(); // not configured
   });
@@ -352,7 +353,7 @@ describe("through captureOrder (all safety checks still apply to Gemini output)"
       ),
     );
     const res = await captureOrder(input(BRIEF_MESSAGE), { model: createGeminiModel(ENV) });
-    expect(res).toMatchObject({ engine: "llm", model: "gemini-3.8-flash", fallbackReason: null });
+    expect(res).toMatchObject({ engine: "llm", model: "gemini-3.5-flash-lite", fallbackReason: null });
     expect(res.lines.map((l) => [l.skuId, l.quantity, l.unit])).toEqual([
       ["SKU-BS-075", 5, "case"],
       ["SKU-DT-1KG", 2, "case"],

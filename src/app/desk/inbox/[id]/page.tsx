@@ -11,6 +11,11 @@ import { Review } from "./review";
 
 export const metadata: Metadata = { title: "Review AI capture" };
 
+// Server actions take their time limit from the page they are invoked on (Next.js
+// maxDuration docs). AI capture can use its whole 12 s model budget plus database
+// writes, so allow 30 s here; other desk pages keep the platform default.
+export const maxDuration = 30;
+
 export default async function ReviewPage({ params }: PageProps<"/desk/inbox/[id]">) {
   const { id } = await params;
   const viewer = await requireViewer("desk");

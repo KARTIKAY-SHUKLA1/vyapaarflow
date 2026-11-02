@@ -199,6 +199,47 @@ describe("placeOrder", () => {
     expect(o.holdReason).toMatch(/^Over credit limit by ₹/);
   });
 
+  it("never lets two simultaneous orders both slip under the credit limit", async () => {
+    const v = await viewerFor("919000000005"); // Maa Durga Kirana: limit ₹50,000, nothing outstanding
+    const cart = [{ skuId: sku["SKU-DT-1KG"], cases: 15 }];
+    const p = (await priceCart(db, v.retailerId!, cart, AS_OF))!;
+    const credit = (await loadCredit(db, v.retailerId!))!;
+    // Each order fits on its own; together they exceed the limit.
+    expect(credit.exposurePaise + p.totals.totalPaise).toBeLessThanOrEqual(credit.limitPaise);
+    expect(credit.exposurePaise + 2 * p.totals.totalPaise).toBeGreaterThan(credit.limitPaise);
+
+    // Both orders are priced before either write transaction starts, so both
+    // pre-transaction credit checks see the same (stale) exposure. Then the writes
+    // run one after the other, as a remote libSQL/Turso server queues them (a local
+    // file would answer SQLITE_BUSY instead, and the busy retry would re-price).
+    let arrived = 0;
+    let release!: () => void;
+    const bothPriced = new Promise<void>((r) => (release = r));
+    let first: Promise<unknown> | null = null;
+    const gated = new Proxy(db, {
+      get(target, prop) {
+        const value = Reflect.get(target, prop);
+        if (prop !== "transaction") return typeof value === "function" ? value.bind(target) : value;
+        return async (...args: Parameters<DB["transaction"]>) => {
+          if (++arrived >= 2) release();
+          await bothPriced;
+          if (!first) return (first = target.transaction(...args));
+          await first.catch(() => {});
+          return target.transaction(...args);
+        };
+      },
+    }) as DB;
+
+    const place = () => placeOrder(gated, v, { lines: cart, expectedTotalPaise: p.totals.totalPaise, idempotencyKey: key() }, { now: NOW });
+    const results = await Promise.all([place(), place()]);
+    expect(results.map((r) => (r.ok ? r.status : r.error)).sort()).toEqual(["credit_hold", "placed"]);
+
+    const held = results.find((r) => r.ok && r.status === "credit_hold");
+    const [o] = await db.select().from(orders).where(eq(orders.id, held!.ok ? held!.orderId : ""));
+    expect(o.holdReason).toMatch(/^Over credit limit by ₹/);
+    expect(o.creditExposurePaise).toBe(p.totals.totalPaise); // the other order, seen inside the transaction
+  });
+
   it("accepts an order exactly at the credit limit", async () => {
     const v = await viewerFor("919000000005");
     const cart = [{ skuId: sku["SKU-DT-1KG"], cases: 1 }];

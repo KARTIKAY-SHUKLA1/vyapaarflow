@@ -1,16 +1,22 @@
 import { createClient, type Client } from "@libsql/client";
 import { drizzle, type LibSQLDatabase } from "drizzle-orm/libsql";
+import { databaseConfig } from "./config";
 import * as schema from "./schema";
 
 export type DB = LibSQLDatabase<typeof schema>;
 
-/** Local default: a SQLite file. Production: a Turso URL (libsql://…) plus auth token. */
+/**
+ * Local default: a SQLite file. Production: a Turso URL (libsql://…) plus auth token,
+ * validated by databaseConfig() (throws with a clear message when misconfigured).
+ */
 export function databaseUrl(): string {
-  return process.env.DATABASE_URL ?? "file:./data/local.db";
+  return databaseConfig().url;
 }
 
-export function createDb(url = databaseUrl(), authToken = process.env.DATABASE_AUTH_TOKEN): { db: DB; client: Client } {
-  const client = createClient({ url, authToken });
+/** No arguments: the validated configuration. An explicit URL (tests) is used as given. */
+export function createDb(url?: string, authToken?: string): { db: DB; client: Client } {
+  const config = url === undefined ? databaseConfig() : { url, authToken: authToken ?? process.env.DATABASE_AUTH_TOKEN };
+  const client = createClient({ url: config.url, authToken: config.authToken });
   return { db: drizzle(client, { schema }), client };
 }
 

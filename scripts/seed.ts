@@ -1,7 +1,10 @@
 import { createDb, databaseUrl } from "../src/db";
+import { assertWipeAllowed } from "../src/db/config";
 import { seed } from "../src/db/seed";
 
 async function main() {
+  // Wipes every table: a remote database needs --allow-remote-wipe or ALLOW_REMOTE_WIPE=true.
+  assertWipeAllowed(databaseUrl());
   const { db, client } = createDb();
   const { skuIds, retailerIds, history } = await seed(db);
   client.close();

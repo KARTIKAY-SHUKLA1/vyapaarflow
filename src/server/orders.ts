@@ -5,6 +5,7 @@ import { auditLog, orderLines, orders, retailers, schemes, skus, stock, type Ord
 import { canAccessRetailer, type Viewer } from "@/lib/auth/policy";
 import { formatPaise } from "@/lib/money";
 import { isoDateIST } from "@/lib/pricing";
+import { loadCredit } from "./catalogue";
 import { cartSchema, priceCart, type CartPricing } from "./pricing";
 
 export const placeOrderSchema = z.object({
@@ -50,7 +51,8 @@ async function nextOrderNumber(tx: Pick<DB, "select">, now: Date): Promise<strin
  * - stock is reserved with a conditional update, so a concurrent order can never
  *   take the same cases (STOCK_CHANGED, whole transaction rolled back);
  * - the idempotency key makes double taps and retries return the same order;
- * - over the credit limit → status credit_hold for the desk, never auto-rejected (A7).
+ * - over the credit limit → status credit_hold for the desk, never auto-rejected (A7);
+ *   the credit check is repeated inside the write transaction (see createOrder).
  */
 export async function placeOrder(
   db: DB,
@@ -120,13 +122,20 @@ export async function createOrder(db: DB, args: CreateOrderArgs): Promise<PlaceO
   if (!pricing.orderable) return { ok: false, error: "NOT_ORDERABLE", pricing };
   if (pricing.totals.totalPaise !== input.expectedTotalPaise) return { ok: false, error: "PRICE_CHANGED", pricing };
 
-  const status: OrderStatus = pricing.credit.wouldExceed ? "credit_hold" : "placed";
-  const holdReason = pricing.credit.wouldExceed
-    ? `Over credit limit by ${formatPaise(pricing.credit.exceedsByPaise)} (outstanding + open orders + this order)`
-    : null;
-
   try {
+    // libSQL write transactions start with BEGIN IMMEDIATE, so everything below runs
+    // with the database write lock held and concurrent orders are serialised.
     const created = await db.transaction(async (tx) => {
+      // Re-check credit under the lock. The check in priceCart ran before the lock, so a
+      // simultaneous order from the same shop may have been committed since; same rule
+      // (A7/A11): outstanding + open orders + this order over the limit → credit hold.
+      const credit = await loadCredit(tx, retailerId);
+      if (!credit) throw new Error("retailer disappeared while placing an order");
+      const exceedsByPaise = credit.exposurePaise + pricing.totals.totalPaise - credit.limitPaise;
+      const status: OrderStatus = exceedsByPaise > 0 ? "credit_hold" : "placed";
+      const holdReason =
+        status === "credit_hold" ? `Over credit limit by ${formatPaise(exceedsByPaise)} (outstanding + open orders + this order)` : null;
+
       for (const line of pricing.lines) {
         const need = line.cases + line.freeCases; // free cases ship too (A3)
         const updated = await tx
@@ -151,7 +160,7 @@ export async function createOrder(db: DB, args: CreateOrderArgs): Promise<PlaceO
           gstPaise: pricing.totals.gstPaise,
           totalPaise: pricing.totals.totalPaise,
           idempotencyKey: input.idempotencyKey,
-          creditExposurePaise: pricing.credit.position.exposurePaise,
+          creditExposurePaise: credit.exposurePaise,
           note: input.note || null,
           holdReason,
           captureId: args.captureId ?? null,

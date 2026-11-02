@@ -18,6 +18,7 @@ npm run dev                     # http://localhost:3000
 ```
 
 Demo mode (`DEMO_MODE=true`) lists demo accounts on the sign-in screen and shows the simulated OTP.
+Anyone with the link can then sign in as any user, desk staff included, so use demo mode **only with the fictional seed data**: never with real retailers, prices or phone numbers.
 
 | Role | Mobile |
 |---|---|
@@ -36,10 +37,15 @@ Demo mode (`DEMO_MODE=true`) lists demo accounts on the sign-in screen and shows
 | `npm run db:generate` | Generate a migration from `src/db/schema.ts` |
 | `npm run db:migrate` / `db:seed` / `db:reset` | Apply migrations / seed / both from scratch |
 
+`db:seed` and `db:reset` wipe every table. Against a remote (Turso) database they refuse to run unless you pass `--allow-remote-wipe` (`npm run db:reset -- --allow-remote-wipe`) or set `ALLOW_REMOTE_WIPE=true`.
+
+In production (`NODE_ENV=production`) the server requires `DATABASE_URL` to be a remote `libsql://` Turso URL and `DATABASE_AUTH_TOKEN` to be set, and fails with a clear error otherwise. `next build` is not affected. To run the production build locally against a SQLite file, set `ALLOW_LOCAL_DATABASE=true`.
+
 ## AI order capture
 
 Captured lines are always validated against the catalogue and confirmed by a person; the model never sees or sets prices, stock or schemes.
-The model is pluggable (`AI_PROVIDER`): Anthropic (`ANTHROPIC_API_KEY`) or any OpenAI-compatible endpoint (`AI_BASE_URL`, `AI_MODEL`, optional `AI_API_KEY`).
+The model is pluggable (`AI_PROVIDER`): Google Gemini (`GEMINI_API_KEY`; default model `gemini-3.5-flash-lite`, override with `GEMINI_MODEL`), Anthropic (`ANTHROPIC_API_KEY`) or any OpenAI-compatible endpoint (`AI_BASE_URL`, `AI_MODEL`, optional `AI_API_KEY`).
+Each capture has a 12-second budget; the AI capture pages set `maxDuration = 30` so the server action is not cut off on Vercel.
 With no provider configured, a deterministic rule-based matcher is used and the desk screen says so.
 
 ## Stack

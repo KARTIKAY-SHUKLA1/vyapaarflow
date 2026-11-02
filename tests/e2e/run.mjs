@@ -22,6 +22,8 @@ const env = {
   NODE_ENV: "production",
   DATABASE_URL: "file:./data/e2e.db",
   DATABASE_AUTH_TOKEN: "",
+  // The production build refuses a local file unless told this is a local run.
+  ALLOW_LOCAL_DATABASE: "true",
   SESSION_SECRET: process.env.SESSION_SECRET ?? randomBytes(32).toString("base64url"),
   DEMO_MODE: "true",
   AI_PROVIDER: "none", // deterministic: the UI must label the rule-based fallback

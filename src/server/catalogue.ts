@@ -97,7 +97,8 @@ export type CreditPosition = {
   availablePaise: number;
 };
 
-export async function loadCredit(db: DB, retailerId: string): Promise<CreditPosition | null> {
+/** Accepts a transaction too, so order creation can re-read exposure under the write lock. */
+export async function loadCredit(db: Pick<DB, "select">, retailerId: string): Promise<CreditPosition | null> {
   const [r] = await db
     .select({ limit: retailers.creditLimitPaise, outstanding: retailers.outstandingPaise })
     .from(retailers)
