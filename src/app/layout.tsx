@@ -6,6 +6,8 @@ export const metadata: Metadata = {
   title: { default: "VyapaarFlow", template: "%s · VyapaarFlow" },
   description: "Retailer ordering and AI order capture for an FMCG distributor.",
   applicationName: "VyapaarFlow",
+  appleWebApp: { capable: true, title: "VyapaarFlow", statusBarStyle: "default" },
+  icons: { apple: "/apple-touch-icon.png" },
 };
 
 export const viewport: Viewport = {
