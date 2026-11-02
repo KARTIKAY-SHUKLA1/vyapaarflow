@@ -1,0 +1,69 @@
+@import "tailwindcss";
+
+/*
+ * VyapaarFlow design tokens.
+ * Restrained palette: warm neutrals + one deep green accent. Status colours are
+ * used only to carry meaning (stock, scheme, hold), never for decoration.
+ * System font stack: no web-font download on slow 3G; Android ships Noto Devanagari.
+ */
+@theme {
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", "Noto Sans Devanagari", "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+
+  --color-canvas: #f7f6f2;
+  --color-surface: #ffffff;
+  --color-sunken: #f0eee8;
+  --color-line: #e4e1d9;
+  --color-line-strong: #cfcbc0;
+
+  --color-ink: #1d1c19;
+  --color-ink-2: #55534c;
+  --color-ink-3: #85827a;
+
+  --color-accent: #1f5d46;
+  --color-accent-hover: #184a38;
+  --color-accent-soft: #e6f0eb;
+  --color-accent-ink: #ffffff;
+
+  --color-scheme: #6a4a0c;
+  --color-scheme-soft: #fbf1dc;
+
+  --color-warn: #8a4b00;
+  --color-warn-soft: #fdf0de;
+
+  --color-danger: #a3321f;
+  --color-danger-soft: #fbe9e5;
+
+  --color-info: #23507a;
+  --color-info-soft: #e7eff7;
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+
+  --shadow-card: 0 1px 2px rgb(29 28 25 / 0.05);
+  --shadow-pop: 0 6px 24px rgb(29 28 25 / 0.12);
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+    -webkit-tap-highlight-color: transparent;
+  }
+  body {
+    @apply bg-canvas text-ink font-sans antialiased;
+    font-size: 16px;
+    line-height: 1.5;
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+  }
+  ::selection {
+    background: var(--color-accent-soft);
+  }
+}
+
+@utility num {
+  font-variant-numeric: tabular-nums;
+}
