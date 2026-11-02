@@ -206,10 +206,10 @@ function assertConsistent(order: TallyOrder): void {
 // Builder
 // ---------------------------------------------------------------------------
 
-/** Narration: order note (or empty), flattened to one line, + " | Source: <source>". */
+/** Narration: "<note> | Source: <source>" on one line; just "Source: <source>" when there is no note. */
 function narration(order: TallyOrder): string {
-  const note = (order.note ?? "").replace(/\r\n|\r|\n/g, " ");
-  return `${note} | Source: ${order.source}`;
+  const note = (order.note ?? "").replace(/\r\n|\r|\n/g, " ").trim();
+  return note ? `${note} | Source: ${order.source}` : `Source: ${order.source}`;
 }
 
 function orderRows(order: TallyOrder): Cell[][] {

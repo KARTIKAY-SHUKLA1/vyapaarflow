@@ -114,9 +114,9 @@ describe("buildTallyCsv", () => {
     const row = records(buildTallyCsv([order({ shopName: '=HYPERLINK("x")', note: "+91 call" }, [biscuit])]))[1];
     expect(row).toContain(',"\'=HYPERLINK(""x"")",');
     expect(row.endsWith(",'+91 call | Source: app")).toBe(true);
-    // Empty note: narration starts with a space, not a formula character.
+    // Empty note: narration is just the source, no dangling separator.
     const plain = records(buildTallyCsv([order({ note: null }, [biscuit])]))[1];
-    expect(plain.endsWith(", | Source: app")).toBe(true);
+    expect(plain.endsWith(",Source: app")).toBe(true);
   });
 
   it("formats large and tiny amounts without float error", () => {
