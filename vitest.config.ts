@@ -8,6 +8,7 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["src/**/*.test.ts"],
+    setupFiles: ["src/test/no-network.ts"],
     env: {
       SESSION_SECRET: "test-secret-test-secret-test-secret-0123456789",
       DATABASE_URL: ":memory:",
@@ -16,6 +17,7 @@ export default defineConfig({
       ANTHROPIC_API_KEY: "",
       AI_BASE_URL: "",
       AI_MODEL: "",
+      GEMINI_API_KEY: "",
     },
   },
 });

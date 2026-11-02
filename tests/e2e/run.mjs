@@ -26,6 +26,8 @@ const env = {
   DEMO_MODE: "true",
   AI_PROVIDER: "none", // deterministic: the UI must label the rule-based fallback
   ANTHROPIC_API_KEY: "",
+  GEMINI_API_KEY: "",
+  AI_API_KEY: "",
 };
 
 function run(cmd, args) {
