@@ -8,4 +8,5 @@ export {
   type ModelSegment,
 } from "./llm";
 export { normalize } from "./normalize";
+export { createCaptureModel, createOpenAICompatibleModel } from "./providers";
 export type * from "./types";
