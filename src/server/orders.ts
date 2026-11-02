@@ -61,19 +61,11 @@ export async function placeOrder(
   if (viewer.role !== "retailer" || !viewer.retailerId) return { ok: false, error: "FORBIDDEN" };
   const parsed = placeOrderSchema.safeParse(rawInput);
   if (!parsed.success) return { ok: false, error: "INVALID_INPUT" };
+  const retailerId = viewer.retailerId;
   const now = opts.now ?? new Date();
-
-  // SQLite allows one writer at a time; a simultaneous double tap can hit a
-  // locked database. Retry with backoff: the next attempt's idempotency check
-  // then finds the first order and returns it, so the retailer never sees an error.
-  for (let attempt = 0; ; attempt++) {
-    try {
-      return await attemptPlace(db, viewer, viewer.retailerId, parsed.data, now, opts.source ?? "app");
-    } catch (error) {
-      if (!isBusy(error) || attempt >= BUSY_RETRIES) throw error;
-      await new Promise((r) => setTimeout(r, 40 * 2 ** attempt + Math.random() * 40));
-    }
-  }
+  return withBusyRetry(() =>
+    createOrder(db, { retailerId, actorId: viewer.id, source: opts.source ?? "app", input: parsed.data, now }),
+  );
 }
 
 const BUSY_RETRIES = 6;
@@ -85,14 +77,41 @@ function isBusy(error: unknown): boolean {
   return false;
 }
 
-async function attemptPlace(
-  db: DB,
-  viewer: Viewer,
-  retailerId: string,
-  input: PlaceOrderInput,
-  now: Date,
-  source: OrderSource,
-): Promise<PlaceOrderResult> {
+/**
+ * SQLite allows one writer at a time; a simultaneous double tap can hit a locked
+ * database. Retry with backoff: the next attempt's idempotency check then finds
+ * the first order and returns it, so the user never sees an error.
+ */
+export async function withBusyRetry<T>(fn: () => Promise<T>): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await fn();
+    } catch (error) {
+      if (!isBusy(error) || attempt >= BUSY_RETRIES) throw error;
+      await new Promise((r) => setTimeout(r, 40 * 2 ** attempt + Math.random() * 40));
+    }
+  }
+}
+
+type Tx = Parameters<Parameters<DB["transaction"]>[0]>[0];
+
+export type CreateOrderArgs = {
+  retailerId: string; // decided by the caller's access check, never by the client
+  actorId: string;
+  source: OrderSource;
+  input: PlaceOrderInput;
+  now: Date;
+  captureId?: string;
+  /** Extra writes that must commit or roll back together with the order (e.g. capture confirmation). */
+  onCreated?: (tx: Tx, order: { id: string; number: string }) => Promise<void>;
+};
+
+/**
+ * The single path that creates an order, shared by retailer checkout and desk
+ * capture confirmation. Callers must have authorised `actorId` for `retailerId`.
+ */
+export async function createOrder(db: DB, args: CreateOrderArgs): Promise<PlaceOrderResult> {
+  const { retailerId, input, now, source } = args;
   const previous = await existingOrder(db, retailerId, input.idempotencyKey);
   if (previous) return { ok: true, orderId: previous.id, number: previous.number, status: previous.status, duplicate: true };
 
@@ -135,7 +154,8 @@ async function attemptPlace(
           creditExposurePaise: pricing.credit.position.exposurePaise,
           note: input.note || null,
           holdReason,
-          createdById: viewer.id,
+          captureId: args.captureId ?? null,
+          createdById: args.actorId,
           createdAt: now,
           updatedAt: now,
         })
@@ -160,13 +180,14 @@ async function attemptPlace(
       );
 
       await tx.insert(auditLog).values({
-        actorId: viewer.id,
+        actorId: args.actorId,
         action: status === "credit_hold" ? "order.placed_on_credit_hold" : "order.placed",
         entity: "order",
         entityId: order.id,
-        data: { number, totalPaise: pricing.totals.totalPaise, lines: pricing.lines.length },
+        data: { number, source, totalPaise: pricing.totals.totalPaise, lines: pricing.lines.length },
         createdAt: now,
       });
+      if (args.onCreated) await args.onCreated(tx, order);
       return order;
     });
     return { ok: true, orderId: created.id, number: created.number, status: created.status, duplicate: false };

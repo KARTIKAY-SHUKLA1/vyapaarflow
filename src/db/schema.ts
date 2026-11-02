@@ -143,6 +143,7 @@ export const orders = sqliteTable(
     creditExposurePaise: integer("credit_exposure_paise"),
     note: text("note"),
     holdReason: text("hold_reason"),
+    cancelReason: text("cancel_reason"),
     createdById: text("created_by_id")
       .notNull()
       .references(() => users.id),
@@ -212,6 +213,10 @@ export const captures = sqliteTable("captures", {
   status: text("status", { enum: ["draft", "confirmed", "discarded"] })
     .notNull()
     .default("draft"),
+  /** Set when the desk confirms: who, when, and the order it became. */
+  confirmedById: text("confirmed_by_id"),
+  confirmedAt: integer("confirmed_at", { mode: "timestamp_ms" }),
+  orderId: text("order_id"),
   createdAt: createdAt(),
 });
 
@@ -234,6 +239,12 @@ export const captureLines = sqliteTable(
     confidence: integer("confidence").notNull(), // 0–100
     matchedBy: text("matched_by").notNull(), // alias | history | llm | fuzzy | none
     issues: text("issues", { mode: "json" }).$type<string[]>().notNull().default(sql`'[]'`),
+    // What the desk confirmed (the AI suggestion above is kept unchanged for audit).
+    finalSkuId: text("final_sku_id"),
+    finalQuantity: integer("final_quantity"),
+    finalUnit: text("final_unit", { enum: UNITS }),
+    excluded: integer("excluded", { mode: "boolean" }).notNull().default(false),
+    corrected: integer("corrected", { mode: "boolean" }).notNull().default(false),
   },
   (t) => [index("capture_lines_capture_idx").on(t.captureId)],
 );
