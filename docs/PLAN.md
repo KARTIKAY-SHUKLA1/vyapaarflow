@@ -1,74 +1,117 @@
-# VyapaarFlow — Build Plan
+# VyapaarFlow — Implementation Plan
 
-Isocode Labs take-home, Problem 5: FMCG distributor (Jabalpur) retailer ordering app with AI order capture.
-Deadline: 9 Nov 2026, 11:59 pm IST. Deliverables: TDD (PDF/Word, GitHub URL on top) + `deployment.md`, zipped.
+Isocode Labs take-home, **Problem 5**: FMCG distributor (Jabalpur) — retailer ordering app with AI order capture.
+Deadline: **9 Nov 2026, 11:59 pm IST**. Deliverables: TDD (PDF, GitHub URL + live URL on top) and `deployment.md`, zipped.
 
-## 1. What the brief actually scores
+Source of truth: the original Problem 5 brief. Anything not stated there is an **assumption**, labelled `A#` below and in the TDD.
 
-| Requirement (from brief) | How we meet it |
+---
+
+## 1. Core build (must work end to end before any optional feature)
+
+| # | Core workflow | Done when |
+|---|---|---|
+| C1 | Retailer catalogue with prices, schemes, stock | Retailer signs in with OTP, sees only *their* price, the live scheme, stock status and a GST label on every price |
+| C2 | Cart and order | Scheme engine applies free goods / slab discounts; credit limit shown; order placed or put on credit hold |
+| C3 | AI capture from a text order | Desk pastes/receives a message → each line shows original words, SKU, confidence, 2 alternatives; unclear unit is asked; nothing becomes an order until a person confirms; desk corrections saved as retailer aliases |
+| C4 | Order desk with Tally export | Queue of orders (new / credit hold / approved / exported), approve or release hold, export Tally-importable XML + CSV |
+
+Roles: **retailer** and **order desk** (core). Salesman is optional depth (see §7).
+
+**Acceptance test from the brief** — the raw message
+`bhaiya 5 peti biscuit chhota, 2 peti washing powder 1 kilo, chai patti 250 wala 1 peti` must produce:
+
+| Words | Expected result |
 |---|---|
-| Core slice end to end, 6–8 screens | Catalogue → cart → order; AI text capture → review → confirm; order desk → Tally export |
-| Roles: retailer, order desk | Two roles with server-side access checks on every query |
-| Hard part: scheme engine | Pure, fully unit-tested module (free goods + slab discounts, dates, stock, rounding) |
-| AI capture from text, honest when wrong | Real LLM call + deterministic matcher; per line: original words, confidence, 2 alternatives; unit (case/piece) asked, never guessed; human confirms; desk corrections → retailer aliases |
-| Frontend, backend, DB, sign-in | Next.js full stack, SQLite/libSQL via Drizzle, OTP login (SMS mocked) |
-| No dead buttons, realistic seed data | Seed from brief's 3 SKUs + expanded fictional catalogue, retailers, 60 days of order history, inbox of WhatsApp-style messages |
-| Polished UI, phone layout, loading/empty/error states | One design system, mobile-first, every list has all three states |
-| Tests, security | Vitest on scheme engine, pricing/GST, AI output validation, access control, Tally export; Zod on all inputs; no secrets committed |
-| 3G, first load < 3 s, large tap targets | Server components, minimal client JS, no heavy UI libs, system font stack, lazy images |
-| Hindi + English, GST clearly shown | EN/हिं toggle; every price labelled "excl. GST" / "incl. GST" |
-| Prices & credit visible only to retailer, their salesman, desk | Enforced in data layer, tested |
+| 5 peti biscuit chhota | SKU-BS-075, 5 cases; scheme engine: no free goods yet, nudge "add 5 more cases for 1 free" |
+| 2 peti washing powder 1 kilo | SKU-DT-1KG, 2 cases; below slab; nudge "3% off from 5 cases" |
+| chai patti 250 wala 1 peti | SKU-TE-250, 1 case; **out of stock (0 cases) → flagged, not orderable** |
 
-## 2. Architecture
+## 2. Hard rules (non-negotiable)
 
-- **Next.js (App Router, TypeScript)** — one deployable for UI + API (server actions / route handlers). Server-rendered pages keep JS small for slow 3G.
-- **Drizzle ORM + libSQL** — SQLite file locally (zero install for reviewers), Turso in production. Same schema both places.
-- **Auth** — phone + 6-digit OTP. OTP hashed, 5-minute expiry, attempt limit. SMS is mocked: OTP written to an outbox and shown in a "demo mode" banner. Session = signed httpOnly cookie (jose).
-- **AI** — `lib/ai/`: (1) deterministic candidate retrieval (normalise Hinglish, retailer aliases, past orders, fuzzy match on catalogue); (2) Claude model picks SKU/qty/unit with confidence via structured output; (3) every model output validated with Zod against the real catalogue — unknown SKUs dropped, missing/unclear unit → question. Works without an API key via the deterministic path (clearly labelled), so the app never breaks.
-- **Scheme engine** — `lib/schemes/`: pure functions, no DB, 100% unit tested.
-- **Tally export** — Tally-importable XML (Sales Order vouchers) + CSV.
-- **PWA** — manifest + service worker so it is installable (offline salesman mode = optional depth).
-- **Deploy** — Vercel + Turso (env var names only in `deployment.md`).
+1. **AI never decides prices, stock or schemes.** The model only proposes `{sku, quantity, unit, confidence}` per line. Price, GST, stock check, scheme benefit and credit check are computed by deterministic server code from the database.
+2. **Every AI output is validated** (Zod) against the real catalogue. Unknown SKU codes are discarded; a missing or ambiguous unit becomes a question, never a guess.
+3. **No order from AI without human confirmation.** Captured orders are drafts until a desk user (or the retailer) confirms.
+4. **No invented business rules.** Where the brief is silent (GST rates, price basis, credit policy) we pick the most conservative reading, make it configurable data, and label it as an assumption.
+5. **Access control on the server**, in the data layer, on every query. Never rely on hidden UI.
+6. **No secrets in the repo.** `.env*` ignored; env var names documented only.
 
-## 3. Data model (first cut)
+## 3. Architecture
 
-`users` (id, phone, name, role: retailer | desk | salesman, retailerId?) ·
-`retailers` (shop name, owner, area, salesmanId, creditLimit, outstanding, priceListId, language) ·
-`brands` · `skus` (code, name, brandId, packSize, unit, gstRate, imageUrl, active) ·
-`price_lists` / `prices` (per retailer tier, dealer price per piece, excl. GST) ·
-`stock` (skuId, cases) ·
-`schemes` (type: FREE_GOODS | SLAB_PERCENT, skuId, buyQty, freeQty, minQty, percent, validFrom, validTo) ·
-`orders` (retailerId, source: app | ai_capture | desk, status: placed | credit_hold | approved | exported | cancelled, totals) ·
-`order_lines` (skuId, qtyCases, freeCases, unitPrice, discount, gst, lineTotal) ·
-`inbound_messages` (retailerId, channel, raw text, status) ·
-`capture_lines` (messageId, originalText, suggestedSkuId, alt1, alt2, qty, unit, confidence, needsUnit, resolved) ·
-`retailer_aliases` (retailerId, phrase → skuId, unit) ·
-`otp_codes`, `sessions`, `audit_log`, `tally_exports`.
+- **Next.js 16 (App Router, TypeScript, React Server Components)** — one deployable for UI and backend (server actions + route handlers). Server-rendered pages keep client JS small for slow 3G.
+- **Drizzle ORM + libSQL** — SQLite file locally (no install for reviewers), **Turso** in production. Same schema, same driver.
+- **Auth** — phone + 6-digit OTP. OTP stored hashed, 5-min expiry, max 5 attempts, resend throttle. SMS is mocked (outbox table; OTP shown in a clearly marked demo banner). Session = signed, httpOnly, SameSite=Lax JWT cookie (`jose`), role re-checked from DB on each request.
+- **Tailwind CSS 4** with a small token set (colour, type, spacing, radius). No component library — keeps bundle small and the UI deliberate.
+- **Scheme engine** — `src/lib/schemes/`: pure functions, no I/O, integer paisa maths, exhaustive unit tests.
+- **AI capture** — `src/lib/capture/`:
+  1. normalise Hinglish (peti/case, chhota/small, kilo/kg, wala…)
+  2. deterministic candidate retrieval: retailer aliases → retailer's past orders → fuzzy catalogue match
+  3. Claude (structured output) chooses among candidates, returns quantity, unit and confidence
+  4. validation + merge: unknown SKUs dropped, 2 alternatives attached, unit questions raised
+  5. if no API key / API error: deterministic matcher only, labelled "rule-based" in the UI — never silently faked
+- **Tally export** — Tally-importable XML (Sales Order vouchers) + CSV; mocked hand-off (file download), logged.
+- **PWA** — manifest + service worker so the app is installable.
+- **Tests** — Vitest: scheme engine, pricing/GST, capture parsing + validation (model mocked), access control, Tally export, OTP.
+- **Deploy** — Vercel (app) + Turso (DB), if their current free tiers fit; otherwise documented alternative.
 
-## 4. Screens (core = 8)
+## 4. Data model
 
-Retailer: 1 Login (phone → OTP) · 2 Catalogue (search, stock, price, scheme, GST label, repeat last order) · 3 Cart (schemes applied, free goods, savings, credit limit) · 4 My orders + order detail.
-Desk: 5 Order queue (new / credit hold / approved / exported) + detail · 6 Message inbox (WhatsApp-style, mocked) · 7 AI capture review (original words, confidence, 2 alternatives, unit question, confirm) · 8 Tally export.
-Optional depth if time: retailers with no order in 14 days, scheme admin, salesman offline mode, photo/voice capture.
+| Table | Key fields |
+|---|---|
+| `users` | id, phone (unique), name, role `retailer \| desk \| salesman`, retailerId?, active |
+| `retailers` | id, code, shopName, ownerName, area, phone, salesmanId?, creditLimitPaise, outstandingPaise, priceTier, language `en \| hi` |
+| `brands` | id, name |
+| `skus` | id, code, name, nameHi, brandId, category, packSize (pieces/case), gstRatePct, imageKey, active |
+| `prices` | skuId, priceTier, dealerPricePaise (per piece, excl. GST) |
+| `stock` | skuId, cases, updatedAt |
+| `schemes` | id, skuId, type `FREE_GOODS \| SLAB_PERCENT`, buyQty, freeQty, minQty, percentBp, validFrom, validTo, active |
+| `orders` | id, number, retailerId, source `app \| capture \| desk`, status `placed \| credit_hold \| approved \| exported \| cancelled`, subtotal/discount/gst/total paise, createdBy, notes |
+| `order_lines` | orderId, skuId, cases, freeCases, unitPricePaise, discountPaise, gstPaise, lineTotalPaise, schemeId?, schemeNote |
+| `inbound_messages` | id, retailerId?, channel `whatsapp \| sms \| manual`, body, receivedAt, status `new \| captured \| converted \| dismissed` |
+| `captures` / `capture_lines` | messageId, engine `llm \| rules`, model; line: originalText, skuId?, alt1, alt2, quantity, unit `case \| piece \| unknown`, confidence, issues[], resolvedBy |
+| `retailer_aliases` | retailerId, phrase (normalised), skuId, unit?, createdBy |
+| `otp_codes`, `sms_outbox` | hashed code, expiry, attempts; mocked SMS log |
+| `audit_log` | actorId, action, entity, entityId, before/after JSON, at |
+| `tally_exports` | id, orderIds, format, createdBy, at |
 
-## 5. Execution phases (each ends in commits pushed to GitHub)
+Money is stored as **integer paise**; no floats in price maths.
 
-1. **Foundation** — scaffold, design tokens, DB schema, seed data, OTP auth + roles, app shell.
-2. **Scheme engine + pricing** (tests first) — parallel with 3.
-3. **AI capture engine** (tests with mocked model) — parallel with 2.
-4. **Retailer flows** — catalogue, cart, place order, my orders.
-5. **Desk flows** — queue, credit hold, inbox, capture review, aliases, Tally export.
-6. **Polish** — Hindi, states, mobile QA, PWA, performance, security pass.
-7. **Docs** — README, `deployment.md`, TDD (PDF), demo logins; deploy.
+## 5. Screens
 
-## 6. Assumptions (to label in the TDD)
+Retailer (mobile-first): **1** Login (phone → OTP) · **2** Catalogue (search, brand filter, stock, price, scheme, GST label, repeat last order) · **3** Cart (scheme applied, free goods, nudges, credit limit, place order) · **4** My orders + order detail.
 
-- A1. Dealer price in the sample data is **per piece, excluding GST**; a case costs price × pack size (e.g. biscuit case = 96 × ₹8.10 = ₹777.60).
-- A2. "peti" = case. Quantities are ordered in cases; pieces only if the retailer explicitly says so.
-- A3. "Buy 10 cases get 1 free" repeats per multiple (20 → 2 free); free goods need stock too.
-- A4. Slab "3% off 5 or more cases" applies to the whole line once the threshold is met.
-- A5. One active scheme per SKU at a time; schemes have validity dates.
-- A6. GST rates per SKU are configurable placeholders and must be verified by the client's accountant.
-- A7. An order that would take the retailer's outstanding above the credit limit goes on **credit hold** for the desk, not rejected.
-- A8. Out-of-stock items can be shown and captured but are not orderable; the desk sees them flagged.
-- A9. Brands, retailers and people in seed data are fictional.
+Order desk (desktop-first, works on phone): **5** Order queue + detail (approve, credit hold release, cancel) · **6** Message inbox (mocked WhatsApp) + paste a new message · **7** AI capture review (original words, confidence, alternatives, unit question, confirm → order) · **8** Tally export.
+
+One layout pattern everywhere: top bar, page title + one primary action, a single content column/table, consistent loading / empty / error states.
+
+## 6. Phases (each ends with checks green → commit → push)
+
+| Phase | Work | Owner |
+|---|---|---|
+| 1 Foundation | Scaffold, tokens, schema, migrations, seed, OTP auth, roles, app shells, test harness | Main agent |
+| 2 Scheme engine + pricing | Pure module, tests first | Subagent (parallel with 3) |
+| 3 AI capture engine | Normaliser, matcher, LLM adapter, validation, tests with mocked model | Subagent (parallel with 2) |
+| 4 Retailer flows | C1, C2 | Main agent |
+| 5 Desk flows | C3 UI, C4 | Main agent |
+| 6 Polish | Hindi, states, mobile QA, PWA, performance, security | Main agent |
+| 7 Review | Independent code + security review, fixes | Fresh subagent |
+| 8 Docs + deploy | README, `deployment.md`, TDD PDF, Vercel + Turso | Main agent |
+
+Checks before every commit: `typecheck`, `lint`, `test`, `build`.
+
+## 7. Optional depth (only after C1–C4 are done)
+
+In priority order: retailers with no order in 14 days · repeat order · van loading list · audit log view · salesman role (sees only own retailers) · offline salesman mode · photo / voice capture.
+
+## 8. Assumptions (also in the TDD)
+
+- **A1** Sample "Dealer Price ₹" is **per piece, excluding GST**; a case costs price × pack size (biscuit case = 96 × ₹8.10 = ₹777.60). *Reason: ₹8.10 is implausible for a case of 96.* Confirm with client.
+- **A2** Orders are in **cases**. "peti" = case. Pieces only when the message explicitly says so; otherwise the unit is asked.
+- **A3** "Buy 10 cases get 1 free" repeats per full multiple (20 → 2 free). Free cases also need stock; if stock is short, free cases are capped and the line is flagged.
+- **A4** "3% off 5 or more cases" applies to the whole line value once the threshold is met.
+- **A5** At most one active scheme per SKU at a time; schemes carry validity dates.
+- **A6** GST: rates are **per-SKU configurable placeholders**, not tax advice; the UI always states whether a figure is excl. or incl. GST. Discount applied before GST. To be verified by the client's accountant.
+- **A7** Credit: if outstanding + new order total exceeds the credit limit, the order goes to **credit hold** for the desk to release or cancel. It is never auto-rejected and never auto-released.
+- **A8** Out-of-stock SKUs are visible but cannot be added; captured lines for them are flagged.
+- **A9** All brands, retailers, people and phone numbers in seed data are fictional.
+- **A10** SMS/WhatsApp, payment and Tally are mocked (outbox table, file export).
