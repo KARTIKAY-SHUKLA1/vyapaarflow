@@ -7,11 +7,15 @@
 // matcher, runs every suite in a real headless browser, and exits non-zero if any
 // check fails. Set E2E_BASE_URL to test an already running server instead
 // (that server's data will be modified).
+//
+// Run only some suites by name: `npm run e2e -- landing,security` or E2E_ONLY=landing.
+// `npm run e2e:landing` runs just the public landing page suite.
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
 import { launch } from "./lib.mjs";
 import desk from "./desk.mjs";
+import landing from "./landing.mjs";
 import retailer from "./retailer.mjs";
 import security from "./security.mjs";
 
@@ -65,12 +69,14 @@ async function main() {
 
   const browser = await launch();
   const failures = [];
+  let total = 0;
   try {
-    const only = process.env.E2E_ONLY?.split(",");
-    for (const [name, suite] of [["retailer", retailer], ["desk", desk], ["security", security]]) {
+    const only = (process.env.E2E_ONLY || process.argv.slice(2).join(",") || null)?.split(",").filter(Boolean);
+    for (const [name, suite] of [["landing", landing], ["retailer", retailer], ["desk", desk], ["security", security]]) {
       if (only && !only.includes(name)) continue;
       console.log(`\n■ ${name}`);
       const checks = await suite(browser);
+      total += checks.results.length;
       failures.push(...checks.failed.map((f) => `${name}: ${f.name}${f.detail ? ` — ${f.detail}` : ""}`));
     }
   } finally {
@@ -78,10 +84,10 @@ async function main() {
   }
 
   if (failures.length) {
-    console.error(`\n${failures.length} check(s) failed:\n  ${failures.join("\n  ")}`);
+    console.error(`\n${failures.length} of ${total} check(s) failed:\n  ${failures.join("\n  ")}`);
     process.exitCode = 1;
   } else {
-    console.log("\nAll end-to-end checks passed.");
+    console.log(`\nAll ${total} end-to-end checks passed.`);
   }
 }
 

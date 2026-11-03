@@ -43,6 +43,19 @@
 
   --shadow-card: 0 1px 2px rgb(29 28 25 / 0.05);
   --shadow-pop: 0 6px 24px rgb(29 28 25 / 0.12);
+
+  /* Public landing page only (src/app/_landing). The app screens keep the warm palette above. */
+  --color-navy-950: #0a1628;
+  --color-navy-900: #0f2140;
+  --color-navy-800: #172d52;
+  --color-navy-700: #26416b;
+  --color-navy-300: #a3b3cb; /* 7.6:1 on navy-900 */
+  --color-navy-100: #dfe6f0;
+  --color-slate: #4a5a75; /* body copy on white, 6.9:1 */
+  --color-mist: #f3f5f9;
+  --color-leaf: #6fd3a1; /* green on navy, 9.4:1 on navy-900 */
+  --color-leaf-strong: #3fb47a; /* CTA fill on navy; navy-950 text 6.9:1 */
+  --shadow-frame: 0 24px 60px -20px rgb(6 14 28 / 0.55), 0 2px 6px rgb(6 14 28 / 0.25);
 }
 
 @layer base {
@@ -67,6 +80,23 @@
 @keyframes toast-in {
   from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: translateY(0); }
+}
+
+/* Landing page: a short rise from a visible resting state (never starts hidden). */
+@keyframes landing-rise {
+  from { transform: translateY(14px); }
+  to { transform: translateY(0); }
+}
+@keyframes landing-fade {
+  from { opacity: 0.4; }
+  to { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .landing-motion,
+  .landing-motion * {
+    animation: none !important;
+    transition: none !important;
+  }
 }
 
 @utility num {
