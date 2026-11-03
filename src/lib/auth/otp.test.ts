@@ -82,3 +82,62 @@ describe("verifyOtp", () => {
     expect((await verifyOtp(db, RETAILER, "222222", at(33_000))).ok).toBe(true);
   });
 });
+
+// Security audit H1 and M1: limits must hold when requests arrive at the same time,
+// not only one after another. testDb() is a real SQLite file, so these run with
+// genuine concurrent connections.
+describe("concurrent requests", () => {
+  const attemptsFor = async (phone: string) =>
+    (await db.select({ attempts: otpCodes.attempts }).from(otpCodes).where(eq(otpCodes.phone, phone))).map((r) => r.attempts);
+
+  it("H1: 40 simultaneous wrong guesses use at most 5 attempts, then the right code is refused", async () => {
+    await requestOtp(db, RETAILER, t0, fixed("246810"));
+    const wrong = Array.from({ length: 40 }, (_, i) => String(100000 + i)); // none is 246810
+    const results = await Promise.all(wrong.map((c) => verifyOtp(db, RETAILER, c, at(1000))));
+
+    expect(results.every((r) => !r.ok)).toBe(true);
+    // Exactly OTP_MAX_ATTEMPTS guesses were compared: the first four say INVALID, the
+    // fifth and every guess that found no attempt left say TOO_MANY_ATTEMPTS.
+    expect(results.filter((r) => !r.ok && r.error === "INVALID")).toHaveLength(OTP_MAX_ATTEMPTS - 1);
+    expect(results.filter((r) => !r.ok && r.error === "TOO_MANY_ATTEMPTS")).toHaveLength(40 - (OTP_MAX_ATTEMPTS - 1));
+    expect(await attemptsFor(RETAILER)).toEqual([OTP_MAX_ATTEMPTS]);
+
+    expect(await verifyOtp(db, RETAILER, "246810", at(2000))).toEqual({ ok: false, error: "TOO_MANY_ATTEMPTS" });
+  });
+
+  it("H1: the right code sent many times at once signs in exactly once", async () => {
+    await requestOtp(db, RETAILER, t0, fixed("246810"));
+    const results = await Promise.all(Array.from({ length: 10 }, () => verifyOtp(db, RETAILER, "246810", at(1000))));
+    expect(results.filter((r) => r.ok)).toHaveLength(1);
+  });
+
+  it("M1: 20 simultaneous requests issue one code and queue one SMS", async () => {
+    const results = await Promise.all(Array.from({ length: 20 }, (_, i) => requestOtp(db, RETAILER, t0, fixed(String(300000 + i)))));
+    expect(results.filter((r) => r.ok)).toHaveLength(1);
+    expect(results.filter((r) => !r.ok && r.error === "RATE_LIMITED")).toHaveLength(19);
+    expect(await db.select().from(otpCodes).where(eq(otpCodes.phone, RETAILER))).toHaveLength(1);
+    const sms = await db.select().from(smsOutbox).where(eq(smsOutbox.toPhone, RETAILER));
+    expect(sms).toHaveLength(1);
+
+    // The one SMS carries the one code that was stored.
+    const sentCode = sms[0].body.slice(0, 6);
+    expect((await verifyOtp(db, RETAILER, sentCode, at(1000))).ok).toBe(true);
+  });
+
+  it("M1: simultaneous requests cannot push past 5 codes in an hour", async () => {
+    for (let i = 0; i < 4; i++) expect((await requestOtp(db, RETAILER, at(i * 60_000))).ok).toBe(true);
+    const burst = await Promise.all(Array.from({ length: 20 }, () => requestOtp(db, RETAILER, at(5 * 60_000))));
+    expect(burst.filter((r) => r.ok)).toHaveLength(1); // the fifth and last code this hour
+    const later = await Promise.all(Array.from({ length: 20 }, () => requestOtp(db, RETAILER, at(10 * 60_000))));
+    expect(later.filter((r) => r.ok)).toHaveLength(0);
+    expect(await db.select().from(otpCodes).where(eq(otpCodes.phone, RETAILER))).toHaveLength(5);
+    expect(await db.select().from(smsOutbox).where(eq(smsOutbox.toPhone, RETAILER))).toHaveLength(5);
+  });
+
+  it("M1: unknown numbers are throttled the same way and never get an SMS", async () => {
+    const results = await Promise.all(Array.from({ length: 20 }, () => requestOtp(db, UNKNOWN, t0)));
+    expect(results.filter((r) => r.ok)).toHaveLength(1);
+    expect(await db.select().from(otpCodes).where(eq(otpCodes.phone, UNKNOWN))).toHaveLength(1);
+    expect(await db.select().from(smsOutbox).where(eq(smsOutbox.toPhone, UNKNOWN))).toHaveLength(0);
+  });
+});

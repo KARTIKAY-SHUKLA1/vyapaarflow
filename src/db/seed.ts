@@ -11,6 +11,7 @@ export async function seed(db: DB, now = new Date()) {
     s.auditLog,
     s.smsOutbox,
     s.otpCodes,
+    s.rateLimits,
     s.retailerAliases,
     s.captureLines,
     s.captures,

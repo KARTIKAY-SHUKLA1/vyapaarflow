@@ -1,6 +1,7 @@
 import { createHmac, randomInt, timingSafeEqual } from "node:crypto";
-import { and, desc, eq, gte, isNull } from "drizzle-orm";
+import { and, desc, eq, gt, gte, isNull, lt, sql } from "drizzle-orm";
 import type { DB } from "@/db";
+import { withBusyRetry } from "@/db/busy";
 import { otpCodes, smsOutbox, users } from "@/db/schema";
 import { sessionSecret } from "./secret";
 
@@ -25,6 +26,13 @@ export type RequestOtpResult = { ok: true } | { ok: false; error: "RATE_LIMITED"
  * Issues an OTP for a registered, active user. For unknown numbers it returns the
  * same `{ ok: true }` without sending anything, so the endpoint does not reveal
  * which numbers are registered. SMS is mocked: the message goes to `sms_outbox`.
+ *
+ * Concurrency: the limit check, the new code and the outbox row are one write
+ * transaction (libSQL "write" = BEGIN IMMEDIATE, so it holds the database write
+ * lock from the start). Simultaneous requests are serialised and each one sees the
+ * codes issued before it, so neither the 30-second gap nor the hourly cap can be
+ * raced. `sms_outbox` is a transactional outbox: a real SMS sender would read it
+ * after commit, never call the gateway inside this transaction.
  */
 export async function requestOtp(
   db: DB,
@@ -32,45 +40,52 @@ export async function requestOtp(
   now = new Date(),
   generate: () => string = () => randomInt(0, 1_000_000).toString().padStart(6, "0"),
 ): Promise<RequestOtpResult> {
-  const recent = await db
-    .select({ createdAt: otpCodes.createdAt })
-    .from(otpCodes)
-    .where(and(eq(otpCodes.phone, phone), gte(otpCodes.createdAt, new Date(now.getTime() - 3_600_000))))
-    .orderBy(desc(otpCodes.createdAt));
-
-  if (recent.length > 0) {
-    const sinceLast = now.getTime() - recent[0].createdAt.getTime();
-    if (sinceLast < OTP_RESEND_GAP_MS) {
-      return { ok: false, error: "RATE_LIMITED", retryAfterSec: Math.ceil((OTP_RESEND_GAP_MS - sinceLast) / 1000) };
-    }
-    if (recent.length >= OTP_MAX_PER_HOUR) {
-      const oldest = recent[recent.length - 1].createdAt.getTime();
-      return { ok: false, error: "RATE_LIMITED", retryAfterSec: Math.ceil((oldest + 3_600_000 - now.getTime()) / 1000) };
-    }
-  }
-
-  const [user] = await db.select({ id: users.id, active: users.active }).from(users).where(eq(users.phone, phone));
-
-  // Record the attempt for unknown numbers too, so rate limits apply uniformly.
+  // Generated before the transaction, so a busy retry reuses the same code.
   const code = generate();
-  await db.insert(otpCodes).values({
-    phone,
-    codeHash: hashOtp(phone, code),
-    expiresAt: new Date(now.getTime() + OTP_TTL_MS),
-    createdAt: now,
-    // Unknown/inactive numbers get an already-consumed code that can never verify.
-    consumedAt: user?.active ? null : now,
-  });
+  const codeHash = hashOtp(phone, code);
 
-  if (user?.active) {
-    await db.insert(smsOutbox).values({
-      toPhone: phone,
-      body: `${code} is your VyapaarFlow login code. It expires in 5 minutes. Do not share it.`,
-      purpose: "otp",
-      createdAt: now,
-    });
-  }
-  return { ok: true };
+  return withBusyRetry(() =>
+    db.transaction(async (tx): Promise<RequestOtpResult> => {
+      const recent = await tx
+        .select({ createdAt: otpCodes.createdAt })
+        .from(otpCodes)
+        .where(and(eq(otpCodes.phone, phone), gte(otpCodes.createdAt, new Date(now.getTime() - 3_600_000))))
+        .orderBy(desc(otpCodes.createdAt));
+
+      if (recent.length > 0) {
+        const sinceLast = now.getTime() - recent[0].createdAt.getTime();
+        if (sinceLast < OTP_RESEND_GAP_MS) {
+          return { ok: false, error: "RATE_LIMITED", retryAfterSec: Math.ceil((OTP_RESEND_GAP_MS - sinceLast) / 1000) };
+        }
+        if (recent.length >= OTP_MAX_PER_HOUR) {
+          const oldest = recent[recent.length - 1].createdAt.getTime();
+          return { ok: false, error: "RATE_LIMITED", retryAfterSec: Math.ceil((oldest + 3_600_000 - now.getTime()) / 1000) };
+        }
+      }
+
+      const [user] = await tx.select({ id: users.id, active: users.active }).from(users).where(eq(users.phone, phone));
+
+      // Record the attempt for unknown numbers too, so rate limits apply uniformly.
+      await tx.insert(otpCodes).values({
+        phone,
+        codeHash,
+        expiresAt: new Date(now.getTime() + OTP_TTL_MS),
+        createdAt: now,
+        // Unknown/inactive numbers get an already-consumed code that can never verify.
+        consumedAt: user?.active ? null : now,
+      });
+
+      if (user?.active) {
+        await tx.insert(smsOutbox).values({
+          toPhone: phone,
+          body: `${code} is your VyapaarFlow login code. It expires in 5 minutes. Do not share it.`,
+          purpose: "otp",
+          createdAt: now,
+        });
+      }
+      return { ok: true };
+    }),
+  );
 }
 
 export type VerifyOtpResult =
@@ -91,18 +106,48 @@ export async function verifyOtp(db: DB, phone: string, code: string, now = new D
   if (otp.expiresAt.getTime() <= now.getTime()) return { ok: false, error: "EXPIRED" };
   if (otp.attempts >= OTP_MAX_ATTEMPTS) return { ok: false, error: "TOO_MANY_ATTEMPTS" };
 
+  // Take one attempt atomically BEFORE comparing. The conditional update is a single
+  // statement, so simultaneous guesses each claim a distinct attempt and at most
+  // OTP_MAX_ATTEMPTS of them (right or wrong) are ever compared against the hash.
+  // A busy (locked) statement never applied, so retrying it cannot take two attempts.
+  const [taken] = await withBusyRetry(() =>
+    db
+      .update(otpCodes)
+      .set({ attempts: sql`${otpCodes.attempts} + 1` })
+      .where(
+        and(
+          eq(otpCodes.id, otp.id),
+          isNull(otpCodes.consumedAt),
+          lt(otpCodes.attempts, OTP_MAX_ATTEMPTS),
+          gt(otpCodes.expiresAt, now),
+        ),
+      )
+      .returning({ attempts: otpCodes.attempts }),
+  );
+
+  if (!taken) {
+    // Lost a race: the code was used, expired or ran out of attempts meanwhile.
+    const [current] = await db
+      .select({ consumedAt: otpCodes.consumedAt, expiresAt: otpCodes.expiresAt })
+      .from(otpCodes)
+      .where(eq(otpCodes.id, otp.id));
+    if (!current || current.consumedAt) return { ok: false, error: "INVALID" };
+    if (current.expiresAt.getTime() <= now.getTime()) return { ok: false, error: "EXPIRED" };
+    return { ok: false, error: "TOO_MANY_ATTEMPTS" };
+  }
+
   if (!safeEqualHex(otp.codeHash, hashOtp(phone, code))) {
-    const attempts = otp.attempts + 1;
-    await db.update(otpCodes).set({ attempts }).where(eq(otpCodes.id, otp.id));
-    return { ok: false, error: attempts >= OTP_MAX_ATTEMPTS ? "TOO_MANY_ATTEMPTS" : "INVALID" };
+    return { ok: false, error: taken.attempts >= OTP_MAX_ATTEMPTS ? "TOO_MANY_ATTEMPTS" : "INVALID" };
   }
 
   // Consume atomically: only succeeds if nobody else consumed it first.
-  const consumed = await db
-    .update(otpCodes)
-    .set({ consumedAt: now })
-    .where(and(eq(otpCodes.id, otp.id), isNull(otpCodes.consumedAt)))
-    .returning({ id: otpCodes.id });
+  const consumed = await withBusyRetry(() =>
+    db
+      .update(otpCodes)
+      .set({ consumedAt: now })
+      .where(and(eq(otpCodes.id, otp.id), isNull(otpCodes.consumedAt)))
+      .returning({ id: otpCodes.id }),
+  );
   if (consumed.length === 0) return { ok: false, error: "INVALID" };
 
   const [user] = await db.select({ id: users.id, active: users.active }).from(users).where(eq(users.phone, phone));

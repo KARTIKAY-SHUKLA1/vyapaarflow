@@ -1,6 +1,7 @@
 import { and, desc, eq, gte, inArray, like, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { DB } from "@/db";
+import { isBusy, withBusyRetry } from "@/db/busy";
 import { auditLog, orderLines, orders, retailers, schemes, skus, stock, type OrderSource, type OrderStatus } from "@/db/schema";
 import { canAccessRetailer, type Viewer } from "@/lib/auth/policy";
 import { formatPaise } from "@/lib/money";
@@ -70,30 +71,13 @@ export async function placeOrder(
   );
 }
 
-const BUSY_RETRIES = 6;
-
-function isBusy(error: unknown): boolean {
-  for (let e = error; e instanceof Error; e = (e as Error & { cause?: unknown }).cause) {
-    if ((e as { code?: string }).code === "SQLITE_BUSY" || /database is locked/i.test(e.message)) return true;
-  }
-  return false;
-}
-
 /**
  * SQLite allows one writer at a time; a simultaneous double tap can hit a locked
- * database. Retry with backoff: the next attempt's idempotency check then finds
- * the first order and returns it, so the user never sees an error.
+ * database. withBusyRetry (src/db/busy.ts) retries with backoff: the next attempt's
+ * idempotency check then finds the first order and returns it, so the user never
+ * sees an error. Re-exported here for the desk, capture and Tally services.
  */
-export async function withBusyRetry<T>(fn: () => Promise<T>): Promise<T> {
-  for (let attempt = 0; ; attempt++) {
-    try {
-      return await fn();
-    } catch (error) {
-      if (!isBusy(error) || attempt >= BUSY_RETRIES) throw error;
-      await new Promise((r) => setTimeout(r, 40 * 2 ** attempt + Math.random() * 40));
-    }
-  }
-}
+export { withBusyRetry };
 
 type Tx = Parameters<Parameters<DB["transaction"]>[0]>[0];
 

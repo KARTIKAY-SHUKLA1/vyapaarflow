@@ -282,6 +282,17 @@ export const otpCodes = sqliteTable(
   (t) => [index("otp_phone_idx").on(t.phone, t.createdAt)],
 );
 
+/**
+ * Fixed-window counters for abuse limits (per-IP and global OTP limits). One row
+ * per key, updated by a single atomic upsert (src/lib/auth/rate-limit.ts). Keys
+ * never contain a raw IP address, only a keyed hash of it.
+ */
+export const rateLimits = sqliteTable("rate_limits", {
+  key: text("key").primaryKey(),
+  windowStart: integer("window_start").notNull(), // Unix ms, start of the current window
+  count: integer("count").notNull(),
+});
+
 /** Mocked SMS/WhatsApp gateway: everything "sent" is written here (assumption A10). */
 export const smsOutbox = sqliteTable("sms_outbox", {
   id: id(),

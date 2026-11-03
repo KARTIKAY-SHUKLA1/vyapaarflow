@@ -1,13 +1,16 @@
 "use server";
 
 import { eq } from "drizzle-orm";
+import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { db } from "@/db";
 import { auditLog, users } from "@/db/schema";
+import { clientIp } from "@/lib/auth/client-ip";
 import { startSession } from "@/lib/auth/dal";
 import { latestDemoOtp, OTP_RESEND_GAP_MS, requestOtp, verifyOtp } from "@/lib/auth/otp";
 import { homeFor, LOGIN_ROLES } from "@/lib/auth/policy";
+import { checkOtpRateLimit } from "@/lib/auth/rate-limit";
 import { normalizeIndianMobile } from "@/lib/phone";
 
 export type LoginState = {
@@ -35,6 +38,20 @@ export async function loginAction(prev: LoginState, formData: FormData): Promise
     const phone = parsed.success ? normalizeIndianMobile(parsed.data.phone) : null;
     if (!phone) return { step: "phone", error: "phoneInvalid" };
 
+    // Per-IP and global limits first, before any user lookup: the answer is the same
+    // whether or not the number is registered. Per-phone limits follow in requestOtp.
+    const limited = await checkOtpRateLimit(db, "send", clientIp(await headers()));
+    if (!limited.ok) {
+      return {
+        step: prev.step === "otp" ? "otp" : "phone",
+        phone,
+        error: "rateLimited",
+        retryAfterSec: limited.retryAfterSec,
+        waitUntil: Date.now() + limited.retryAfterSec * 1000,
+        demoOtp: prev.demoOtp,
+      };
+    }
+
     // Block roles not enabled in this build before sending a code.
     const [user] = await db.select({ role: users.role }).from(users).where(eq(users.phone, phone));
     if (user && !LOGIN_ROLES.includes(user.role)) return { step: "phone", phone, error: "roleNotEnabled" };
@@ -57,6 +74,9 @@ export async function loginAction(prev: LoginState, formData: FormData): Promise
   if (intent === "verify") {
     const parsed = verifySchema.safeParse({ phone: formData.get("phone"), code: formData.get("code") });
     if (!parsed.success) return { ...prev, step: "otp", error: "otpInvalid" };
+
+    const limited = await checkOtpRateLimit(db, "verify", clientIp(await headers()));
+    if (!limited.ok) return { ...prev, step: "otp", error: "rateLimited", retryAfterSec: limited.retryAfterSec };
 
     const result = await verifyOtp(db, parsed.data.phone, parsed.data.code);
     if (!result.ok) {
