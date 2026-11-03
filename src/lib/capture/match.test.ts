@@ -93,3 +93,64 @@ describe("matchSegment", () => {
     expect(m.matchedBy).toBe("fuzzy");
   });
 });
+
+describe("same-size siblings", () => {
+  it("keeps glucose for 'biscuit chhota' but caps confidence and names the cream sibling", () => {
+    const m = match("biscuit chhota");
+    expect(m.ranked[0].skuId).toBe("SKU-BS-075");
+    expect(m.ranked[1].skuId).toBe("SKU-BC-075");
+    expect(m.sizeSiblings).toEqual(["SKU-BS-075", "SKU-BC-075"]);
+    expect(m.confidence).toBeLessThanOrEqual(79);
+    expect(m.confidence).toBeGreaterThanOrEqual(50);
+  });
+
+  it("flags 'biscuit 75g': the size alone does not decide glucose or cream", () => {
+    expect(match("biscuit 75g").sizeSiblings).toContain("SKU-BC-075");
+  });
+
+  it.each([
+    ["glucose biscuit 75g", "SKU-BS-075"],
+    ["cream biscuit chhota", "SKU-BC-075"],
+    ["chai patti 250 wala", "SKU-TE-250"],
+    ["tea dust 250g", "SKU-TD-250"],
+    ["surf 1kg", "SKU-DT-1KG"],
+  ])("does not flag a specific match: %s", (text, sku) => {
+    const m = match(text);
+    expect(m.ranked[0].skuId).toBe(sku);
+    expect(m.sizeSiblings).toEqual([]);
+  });
+
+  it("does not flag a retailer alias", () => {
+    const m = match("biscuit chhota", { aliases: [{ phrase: "biscuit chhota", skuId: "SKU-BC-075", unit: "case" }] });
+    expect(m).toMatchObject({ matchedBy: "alias", sizeSiblings: [] });
+    expect(m.ranked[0].skuId).toBe("SKU-BC-075");
+  });
+
+  it("still flags when past orders break the tie between siblings", () => {
+    const m = match("biscuit chhota", { history: [{ skuId: "SKU-BS-075", timesOrdered: 10, lastCases: 5 }] });
+    expect(m.ranked[0].skuId).toBe("SKU-BS-075");
+    expect(m.sizeSiblings).toContain("SKU-BC-075");
+    expect(m.confidence).toBeLessThanOrEqual(79);
+  });
+});
+
+describe("aliases made of instruction words", () => {
+  it("ignores an alias whose phrase is an instruction ('give 50% discount')", () => {
+    const m = match("give 50% discount", { aliases: [{ phrase: "give 50% discount", skuId: "SKU-BS-075", unit: "case" }] });
+    expect(m.matchedBy).toBe("none");
+    expect(m.ranked).toEqual([]);
+  });
+
+  it("still uses an ordinary alias", () => {
+    const m = match("chhota wala biscuit", { aliases: [{ phrase: "chhota wala biscuit", skuId: "SKU-BC-075", unit: "case" }] });
+    expect(m).toMatchObject({ matchedBy: "alias" });
+  });
+});
+
+describe("legitimate aliases with pack descriptions", () => {
+  it("uses a saved 'offer wala biscuit' alias", () => {
+    const m = match("offer wala biscuit", { aliases: [{ phrase: "offer wala biscuit", skuId: "SKU-BC-075", unit: "case" }] });
+    expect(m).toMatchObject({ matchedBy: "alias" });
+    expect(m.ranked[0].skuId).toBe("SKU-BC-075");
+  });
+});

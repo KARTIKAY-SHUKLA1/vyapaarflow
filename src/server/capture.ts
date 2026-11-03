@@ -14,7 +14,7 @@ import {
   type OrderStatus,
 } from "@/db/schema";
 import type { Viewer } from "@/lib/auth/policy";
-import { aliasPhrase, captureOrder, CircuitBreaker, MAX_MESSAGE_CHARS, type CaptureModel } from "@/lib/capture";
+import { aliasEligible, aliasPhrase, captureOrder, CircuitBreaker, MAX_MESSAGE_CHARS, type CaptureModel } from "@/lib/capture";
 
 /**
  * One breaker per server process for automatic AI reads (see lib/capture/breaker.ts).
@@ -263,7 +263,9 @@ export const confirmSchema = z.object({
 });
 
 export type ConfirmResult =
-  | PlaceOrderResult
+  /** aliasesSaved: shop words actually saved from the desk's corrections (0 for a repeated confirm). */
+  | (Extract<PlaceOrderResult, { ok: true }> & { aliasesSaved?: number })
+  | Extract<PlaceOrderResult, { ok: false }>
   | { ok: false; error: "NOT_FOUND" | "CLOSED" | "NO_RETAILER" | "NO_LINES" }
   | { ok: false; error: "UNRESOLVED"; lineIds: string[] };
 
@@ -305,7 +307,7 @@ export async function confirmCapture(db: DB, viewer: Viewer, raw: unknown, now =
     const [c] = await db.select({ orderId: captures.orderId }).from(captures).where(eq(captures.id, input.captureId));
     if (!c?.orderId) return null;
     const [o] = await db.select({ id: orders.id, number: orders.number, status: orders.status }).from(orders).where(eq(orders.id, c.orderId));
-    return o ? ({ ok: true, orderId: o.id, number: o.number, status: o.status, duplicate: true } as const) : null;
+    return o ? ({ ok: true, orderId: o.id, number: o.number, status: o.status, duplicate: true, aliasesSaved: 0 } as const) : null;
   };
   if (capture.status === "confirmed") return (await existing()) ?? { ok: false, error: "CLOSED" };
   if (capture.status !== "draft") return { ok: false, error: "CLOSED" };
@@ -323,8 +325,10 @@ export async function confirmCapture(db: DB, viewer: Viewer, raw: unknown, now =
 
   const cart = cartSchema.parse(included.map(({ d }) => ({ skuId: d.skuId!, cases: d.quantity! })));
 
+  // Counted inside the transaction; reset on every attempt so a busy-retry never double-counts.
+  let aliasesSaved = 0;
   try {
-    return await withBusyRetry(() =>
+    const res = await withBusyRetry(() =>
       createOrder(db, {
         retailerId,
         actorId: viewer.id,
@@ -333,6 +337,7 @@ export async function confirmCapture(db: DB, viewer: Viewer, raw: unknown, now =
         now,
         input: { lines: cart, expectedTotalPaise: input.expectedTotalPaise, idempotencyKey: input.idempotencyKey, note: input.note },
         onCreated: async (tx, order) => {
+          aliasesSaved = 0;
           // Only one confirmation can win, even across two desk users.
           const won = await tx
             .update(captures)
@@ -365,8 +370,11 @@ export async function confirmCapture(db: DB, viewer: Viewer, raw: unknown, now =
 
             // Desk corrections become aliases for this retailer (brief). A new SKU or a
             // settled unit is learned; a changed quantity is not (it varies per order).
+            // Never from instruction text, requested terms or a separated quantity: those words
+            // must stay flagged on the next capture instead of turning into a product match.
             const phrase = aliasPhrase(line.originalText);
-            if ((skuChanged || unitResolved) && phrase) {
+            if ((skuChanged || unitResolved) && aliasEligible(line.originalText, line.issues)) {
+              aliasesSaved++;
               await tx
                 .insert(retailerAliases)
                 .values({ retailerId, phrase, skuId: d.skuId!, unit: "case", createdById: viewer.id, createdAt: now })
@@ -397,6 +405,7 @@ export async function confirmCapture(db: DB, viewer: Viewer, raw: unknown, now =
         },
       }),
     );
+    return res.ok ? { ...res, aliasesSaved: res.duplicate ? 0 : aliasesSaved } : res;
   } catch (error) {
     if (error instanceof CaptureRaceError) return (await existing()) ?? { ok: false, error: "CLOSED" };
     throw error;

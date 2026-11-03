@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { finalizeLine, pickAlternatives, resolveUnit, rulesLine, type AnalysedSegment } from "./line";
+import { finalizeLine, pickAlternatives, resolveUnit, rulesLine, siblingIssues, type AnalysedSegment } from "./line";
 import { ModelOutputError, type ModelRequest } from "./llm";
 import type { MatchContext } from "./match";
 import { MAX_QUANTITY } from "./parse";
@@ -47,7 +47,7 @@ function checkedQuantity(modelQty: number | null, seg: AnalysedSegment): number 
 }
 
 function mergeLine(seg: AnalysedSegment, ml: ModelLine, offered: Set<string>, ctx: MatchContext): CaptureLine {
-  const issues: CaptureIssue[] = [];
+  const issues: CaptureIssue[] = [...seg.flags];
   const rulesTop = seg.match.ranked[0]?.skuId ?? null;
   const modelConfidence = ml.confidence * 100;
   // A code counts only if it is in the catalogue AND was offered for this segment.
@@ -71,6 +71,9 @@ function mergeLine(seg: AnalysedSegment, ml: ModelLine, offered: Set<string>, ct
     issues.push("MODEL_DISAGREES");
     [skuId, matchedBy, confidence] = [modelSku, "llm", Math.min(modelConfidence, DISAGREEMENT_CAP)];
   }
+
+  // The model agreeing on one of two equally-worded same-size products does not settle it.
+  if (matchedBy !== "alias") issues.push(...siblingIssues(skuId, seg.match));
 
   const altIds: string[] = [];
   for (const code of ml.alternative_codes) {
@@ -106,11 +109,13 @@ export function mergeModelOutput(
 ): CaptureLine[] {
   const byIndex = new Map<number, ModelLine>();
   for (const line of parseModelOutput(raw)) if (!byIndex.has(line.index)) byIndex.set(line.index, line);
-  const pastCodes = request.pastSkus.map((p) => p.code);
   return segments.map((seg) => {
     const ml = byIndex.get(seg.position);
     if (!ml) return rulesLine(seg, ctx);
+    // Only this segment's own candidates can be chosen. The retailer's past SKUs are sent
+    // as context for choosing between them; they never make an unrelated product valid
+    // (otherwise an instruction like "give 50% discount" could come back as a past SKU).
     const sent = request.segments.find((s) => s.index === seg.position)?.candidates ?? [];
-    return mergeLine(seg, ml, new Set([...sent.map((c) => c.code), ...pastCodes]), ctx);
+    return mergeLine(seg, ml, new Set(sent.map((c) => c.code)), ctx);
   });
 }

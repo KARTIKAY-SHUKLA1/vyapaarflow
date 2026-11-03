@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { normalizeTokens, numberWordValue } from "./normalize";
 import { normalize } from "./normalize";
 
 describe("normalize", () => {
@@ -58,5 +59,40 @@ describe("normalize", () => {
   it("folds spelling variants", () => {
     expect(normalize("biskut chota")).toBe("biscuit chhota");
     expect(normalize("2 petti chay patti")).toBe("2 peti chai patti");
+  });
+});
+
+describe("numberWordValue: 'do' after discount and free words", () => {
+  it.each([
+    [["chhoot"], undefined, null],
+    [["discount"], undefined, null],
+    [["free", "mein"], undefined, null], // filler between the term and "do" is skipped
+    [["free"], "peti", 2], // a unit word follows: the number two
+    [["discount"], "case", 2],
+    [["bhej"], undefined, null], // unchanged: "bhej do" is always the verb
+    [[], "peti", 2],
+    [["rusk"], "peti", 2],
+  ] as const)("do after %j, before %s → %s", (before, next, expected) => {
+    expect(numberWordValue("do", [...before], next)).toBe(expected);
+  });
+
+  it("keeps ordinary Hindi and Hinglish 'do' quantities", () => {
+    for (const text of ["do peti rusk", "rusk do peti", "दो पेटी मैगी", "maggi do case"]) {
+      expect(normalizeTokens(text)).toContain("2");
+    }
+  });
+});
+
+describe("pack descriptions with 'wala'", () => {
+  it.each([
+    ["offer wala biscuit", "offerwala"],
+    ["scheme wala chai", "schemewala"],
+    ["surf free wala", "freewala"],
+    ["ऑफर वाला बिस्कुट", "offerwala"],
+  ])("%s keeps the description as one word (%s), not a requested term", (text, word) => {
+    const tokens = normalizeTokens(text);
+    expect(tokens).toContain(word);
+    expect(tokens).not.toContain("offer");
+    expect(tokens).not.toContain("free");
   });
 });

@@ -1,5 +1,5 @@
 import { aliasKey, aliasPhrase } from "./alias";
-import { LARGE_WORDS, SMALL_WORDS } from "./lexicon";
+import { hasInstructionWords, LARGE_WORDS, SMALL_WORDS } from "./lexicon";
 import { isSizeToken, normalizeTokens } from "./normalize";
 import { conceptsOf, GENERIC_DEFAULTS } from "./synonyms";
 import type { CatalogueItem, HistoryItem, MatchedBy, OrderUnit, RetailerAlias } from "./types";
@@ -21,6 +21,8 @@ const MARGIN_WEIGHT = 2.5;
 const UNKNOWN_WORD_PENALTY = 10;
 const MAX_UNKNOWN_PENALISED = 3;
 const ALIAS_CONFIDENCE = 95; // a desk-confirmed alias for this retailer
+/** Highest confidence (top of "medium") when a same-size sibling matched the words equally well. */
+export const SIZE_SIBLING_CAP = 79;
 
 type SkuProfile = { item: CatalogueItem; concepts: Set<string>; size: number | null };
 
@@ -42,6 +44,13 @@ export type MatchResult = {
   matchedBy: MatchedBy;
   /** Unit stored with the matched alias, if any. */
   aliasUnit: OrderUnit | null;
+  /**
+   * The top pick plus other SKUs of the same category and pack size that the written
+   * words fit at least as well (e.g. "biscuit chhota": glucose and cream 75 g). The top
+   * won only on a nudge (everyday default, chhota/bada, past orders), so a person checks.
+   * Empty when the words themselves decided, or for an alias.
+   */
+  sizeSiblings: string[];
 };
 
 /** Pack size in grams or millilitres. g and ml are compared as equal: retailers write "500 gm" for a 500 ml gel. */
@@ -69,11 +78,12 @@ export function buildMatchContext(
     profiles: catalogue.map(profile),
     byId,
     byCode: new Map(catalogue.map((c) => [c.code, c])),
-    // Aliases pointing at a SKU no longer in the catalogue, or with no product words, are ignored.
+    // Aliases pointing at a SKU no longer in the catalogue, with no product words, or made of
+    // instruction words ("give 50% discount") are ignored, so such text is always flagged.
     aliases: new Map(
       aliases
         .map((a) => [aliasPhrase(a.phrase), a] as const)
-        .filter(([key, a]) => key !== "" && byId.has(a.skuId)),
+        .filter(([key, a]) => key !== "" && byId.has(a.skuId) && !hasInstructionWords(key.split(" "))),
     ),
     historyBonus: new Map(
       history
@@ -93,7 +103,8 @@ function defaultBonus(segConcepts: Set<string>, skuConcepts: Set<string>): numbe
   return bonus;
 }
 
-type Scored = { profile: SkuProfile; share: number; score: number };
+/** base: what the written words alone earned (concepts + pack size), before any nudge. */
+type Scored = { profile: SkuProfile; share: number; base: number; score: number };
 
 function byScoreThenCode(a: Scored, b: Scored): number {
   return b.score - a.score || a.profile.item.code.localeCompare(b.profile.item.code);
@@ -109,9 +120,9 @@ function scoreCatalogue(productWords: string[], ctx: MatchContext): Scored[] {
     const matched = [...segConcepts].filter((c) => p.concepts.has(c)).length;
     if (matched === 0) continue;
     const share = matched / segConcepts.size;
-    let score = FULL_CONCEPT_MATCH * share + defaultBonus(segConcepts, p.concepts);
-    if (segSizes.length > 0 && p.size !== null) score += segSizes.includes(p.size) ? SIZE_MATCH : -SIZE_MISMATCH;
-    scored.push({ profile: p, share, score });
+    let base = FULL_CONCEPT_MATCH * share;
+    if (segSizes.length > 0 && p.size !== null) base += segSizes.includes(p.size) ? SIZE_MATCH : -SIZE_MISMATCH;
+    scored.push({ profile: p, share, base, score: base + defaultBonus(segConcepts, p.concepts) });
   }
 
   // "chhota"/"bada": smallest/largest pack of the best-matching product family.
@@ -137,6 +148,19 @@ function toCandidates(scored: Scored[]): Candidate[] {
   return scored.map((s) => ({ skuId: s.profile.item.id, score: Math.round(Math.min(100, Math.max(0, s.score))) }));
 }
 
+/** Same category and pack size as the top pick, and matched by the written words at least as well. */
+function sizeSiblingsOf(top: Scored, scored: Scored[]): string[] {
+  if (top.profile.size === null) return [];
+  const siblings = scored.filter(
+    (s) =>
+      s !== top &&
+      s.profile.size === top.profile.size &&
+      s.profile.item.category === top.profile.item.category &&
+      s.base >= top.base,
+  );
+  return siblings.length === 0 ? [] : [top, ...siblings].map((s) => s.profile.item.id);
+}
+
 /** Rank catalogue SKUs for one segment's product words. */
 export function matchSegment(productWords: string[], ctx: MatchContext): MatchResult {
   const scored = scoreCatalogue(productWords, ctx);
@@ -149,9 +173,10 @@ export function matchSegment(productWords: string[], ctx: MatchContext): MatchRe
       confidence: ALIAS_CONFIDENCE,
       matchedBy: "alias",
       aliasUnit: alias.unit,
+      sizeSiblings: [],
     };
   }
-  if (scored.length === 0) return { ranked: [], confidence: 0, matchedBy: "none", aliasUnit: null };
+  if (scored.length === 0) return { ranked: [], confidence: 0, matchedBy: "none", aliasUnit: null, sizeSiblings: [] };
 
   const preTop = scored[0];
   const preMargin = preTop.score - (scored[1]?.score ?? 0);
@@ -164,12 +189,15 @@ export function matchSegment(productWords: string[], ctx: MatchContext): MatchRe
 
   const margin = top.score - (scored[1]?.score ?? 0);
   const unknownPenalty = UNKNOWN_WORD_PENALTY * Math.min(MAX_UNKNOWN_PENALISED, unknownWordCount(productWords));
-  const confidence = Math.min(100, top.score) - Math.max(0, CLEAR_MARGIN - margin) * MARGIN_WEIGHT - unknownPenalty;
+  const sizeSiblings = sizeSiblingsOf(top, scored);
+  let confidence = Math.min(100, top.score) - Math.max(0, CLEAR_MARGIN - margin) * MARGIN_WEIGHT - unknownPenalty;
+  if (sizeSiblings.length > 0) confidence = Math.min(confidence, SIZE_SIBLING_CAP);
 
   return {
     ranked: toCandidates(scored),
     confidence: Math.round(Math.min(100, Math.max(0, confidence))),
     matchedBy: decidedByHistory ? "history" : "fuzzy",
     aliasUnit: null,
+    sizeSiblings,
   };
 }

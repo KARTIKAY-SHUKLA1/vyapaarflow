@@ -6,8 +6,9 @@
 
 /** Devanagari words retailers commonly type, mapped to the Latin spelling we match on. */
 export const DEVANAGARI_WORDS: Record<string, string> = {
-  // units
-  पेटी: "peti", पेटि: "peti", पेटियां: "peti", केस: "case", डिब्बा: "box", पीस: "piece", नग: "nag", पैकेट: "packet",
+  // units. डिब्बा ("dabba") is deliberately absent: it can mean one retail box or tin,
+  // so it is not read as a case and the desk asks.
+  पेटी: "peti", पेटि: "peti", पेटियां: "peti", केस: "case", पीस: "piece", नग: "nag", पैकेट: "packet",
   // sizes
   ग्राम: "gram", ग्रा: "g", किलो: "kilo", "कि.ग्रा": "kg", "कि.ग्रा.": "kg", "मि.ली": "ml", "मि.ली.": "ml", एमएल: "ml",
   बड़ा: "bada", बड़ी: "bada", बड़े: "bada", छोटा: "chhota", छोटी: "chhota", छोटे: "chhota",
@@ -17,6 +18,9 @@ export const DEVANAGARI_WORDS: Record<string, string> = {
   आलू: "aloo", भुजिया: "bhujia", नमकीन: "namkeen", खट्टा: "khatta", मीठा: "meetha", मिक्सचर: "mixture",
   मसाला: "masala", नूडल्स: "noodles", मैगी: "maggi", डिटर्जेंट: "detergent", सर्फ: "surf", पाउडर: "powder",
   साबुन: "sabun", टिकिया: "tikki", डिशवॉश: "dishwash", डिशवाश: "dishwash", जेल: "gel", बर्तन: "bartan", नीम: "neem",
+  प्रतिशत: "pratishat", छूट: "chhoot", मुफ्त: "muft", मुफ़्त: "muft", कीमत: "keemat", दाम: "daam",
+  डिस्काउंट: "discount", फ्री: "free", फ़्री: "free", रेट: "rate", स्टॉक: "stock", स्टाक: "stock", स्कीम: "scheme",
+  ऑफर: "offer", ऑफ़र: "offer", एमआरपी: "mrp", लगाओ: "lagao", लगा: "lagao", बदलो: "badlo", में: "mein",
   चाय: "chai", पत्ती: "patti", पत्ति: "patti", डस्ट: "dust",
   // numbers (converted to digits later)
   एक: "ek", दो: "do", तीन: "teen", चार: "char", पाँच: "paanch", पांच: "paanch", छह: "chhe", छः: "chhe",
@@ -62,6 +66,58 @@ export const NUMBER_WORDS: Record<string, number> = {
 
 /** Verbs before "do" that make it "give/send", not the number two ("bhej do"). */
 export const DO_AS_VERB_AFTER = new Set(["bhej", "bhejo", "de", "kar", "send"]);
+
+/**
+ * Terms before "do" that make it "give" ("chhoot do", "discount do", "free mein do") unless a
+ * unit word follows, where it is the number two again ("free do peti maggi" = 2 cases of maggi).
+ */
+export const DO_AS_GIVE_AFTER_TERMS = new Set(["chhoot", "chhut", "discount", "free", "muft", "offer", "scheme"]);
+
+/** "50%", "50 percent", "50 pratishat": a discount or rate, never an order quantity. */
+export const PERCENT_WORDS = new Set(["percent", "percentage", "pct", "pratishat", "pratishet", "prtishat"]);
+
+/**
+ * Commercial terms a retailer may ask for (discount, free goods, price). On a line that names
+ * a product they raise TERMS_REQUESTED: the order still uses normal system pricing and schemes.
+ * "offer wala", "scheme wala" and "free wala" describe a pack, not a request: the normaliser
+ * folds them into one descriptive word ("offerwala"), which is not a term.
+ */
+export const TERMS_WORDS = new Set([
+  "price", "prices", "rate", "rates", "mrp", "keemat", "daam", "discount", "discounts", "chhoot", "chhut",
+  "scheme", "schemes", "offer", "offers", "free", "muft",
+]);
+
+/** Terms that become one descriptive word when "wala" follows ("offer wala biscuit"). */
+export const DESCRIPTIVE_BEFORE_WALA = new Set(["offer", "scheme", "free"]);
+
+/**
+ * Words that mark a fragment as an instruction rather than an item ("give 50% discount",
+ * "mark as in stock", "change price", "add free"): every term above plus instruction verbs
+ * and topics. On a fragment that matched no product they raise INSTRUCTION_TEXT, and the desk
+ * must exclude it. They also keep a phrase from becoming a shop alias (alias.ts).
+ * Nothing in a message ever changes prices, stock, schemes or quantities.
+ */
+export const INSTRUCTION_WORDS = new Set([
+  ...TERMS_WORDS,
+  // verbs
+  "mark", "set", "change", "make", "ignore", "apply", "give", "add", "update", "reduce", "increase",
+  "remove", "respond", "reply", "lagao", "lagana", "badlo", "ghatao",
+  // what an instruction is about
+  "stock", "instruction", "instructions", "system", "prompt",
+]);
+
+/** "50pct", the normalised form of "50%" / "50 percent". */
+export const PERCENT_TOKEN = /^\d+(?:\.\d+)?pct$/;
+
+/** True when the words contain an instruction word or a percentage. */
+export function hasInstructionWords(words: string[]): boolean {
+  return words.some((w) => INSTRUCTION_WORDS.has(w) || PERCENT_TOKEN.test(w));
+}
+
+/** True when the words ask for a discount, free goods, a price or a percentage. */
+export function hasTermsWords(words: string[]): boolean {
+  return words.some((w) => TERMS_WORDS.has(w) || PERCENT_TOKEN.test(w));
+}
 
 export const SMALL_WORDS = new Set(["chhota", "small", "mini"]);
 export const LARGE_WORDS = new Set(["bada", "big", "large", "jumbo"]);

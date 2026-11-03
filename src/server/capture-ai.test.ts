@@ -1,7 +1,7 @@
 import { and, eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { DB } from "@/db";
-import { auditLog, captures, inboundMessages, users } from "@/db/schema";
+import { auditLog, captureLines, captures, inboundMessages, skus, users } from "@/db/schema";
 import type { Viewer } from "@/lib/auth/policy";
 import { CircuitBreaker, type CaptureModel } from "@/lib/capture";
 import { ModelTimeoutError } from "@/lib/capture/llm";
@@ -92,5 +92,30 @@ describe("runCapture: AI pause, manual bypass and history metadata", () => {
     expect(res.ok).toBe(true);
     const [msg] = await db.select().from(inboundMessages).where(eq(inboundMessages.id, id));
     expect(msg.status).toBe("captured");
+  });
+});
+
+describe("runCapture: retailer history cannot authorise an unrelated SKU (eval F5)", () => {
+  it("rejects a past-order detergent SKU the model picks for a biscuit message from RT-1004", async () => {
+    const [jain] = await db.select().from(users).where(eq(users.phone, "919000000004"));
+    const res = await addManualMessage(db, desk, { retailerId: jain.retailerId!, body: "10 peti glucose biscuit 75g" }, NOW);
+    if (!res.ok) throw new Error("add failed");
+    let sentPast: string[] = [];
+    const model: CaptureModel = {
+      name: "mock-model",
+      async propose(req) {
+        sentPast = req.pastSkus.map((p) => p.code);
+        return { lines: [{ index: 0, sku_code: "SKU-DT-4KG", alternative_codes: [], quantity: 10, unit: "case", confidence: 0.99, note: "" }] };
+      },
+    };
+    await runCapture(db, desk, res.messageId, { model, breaker: new CircuitBreaker(), now: NOW });
+    expect(sentPast).toContain("SKU-DT-4KG"); // history is still sent, as context only
+
+    const [capture] = await db.select().from(captures).where(eq(captures.messageId, res.messageId));
+    expect(capture.engine).toBe("llm");
+    const [line] = await db.select().from(captureLines).where(eq(captureLines.captureId, capture.id));
+    const [chosen] = await db.select().from(skus).where(eq(skus.id, line.skuId!));
+    expect(chosen.code).toBe("SKU-BS-075");
+    expect(line.issues).toContain("MODEL_INVALID_SKU");
   });
 });

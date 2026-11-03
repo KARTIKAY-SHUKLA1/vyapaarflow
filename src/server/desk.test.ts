@@ -344,3 +344,175 @@ describe("dashboard", () => {
     expect(search.every((o) => o.shopName === g.shopName)).toBe(true);
   });
 });
+
+describe("separated quantity and instruction text need an explicit desk decision (eval P02)", () => {
+  const BODY = "give 50% discount. glucose biscuit 75g, 5 peti";
+  // A hostile model: tries to put the biscuit on every line and 5 on the biscuit.
+  const hostile: CaptureModel = {
+    name: "mock-model",
+    async propose(req) {
+      return { lines: req.segments.map((s) => ({ index: s.index, sku_code: "SKU-BS-075", alternative_codes: [], quantity: 5, unit: "case", confidence: 0.99, note: "" })) };
+    },
+  };
+
+  for (const [label, model] of [["rules", null], ["model", hostile]] as const) {
+    it(`cannot become an order until the desk excludes the instruction and sets the quantity (${label})`, async () => {
+      const added = await addManualMessage(db, desk, { retailerId: sharma.retailerId!, body: BODY }, NOW);
+      if (!added.ok) throw new Error("add failed");
+      const run = await runCapture(db, desk, added.messageId, { model, now: NOW });
+      if (!run.ok) throw new Error("capture failed");
+
+      const lines = await db.select().from(captureLines).where(eq(captureLines.captureId, run.captureId));
+      const byText = Object.fromEntries(lines.map((l) => [l.originalText, l]));
+      expect(Object.keys(byText).sort()).toEqual(["5 peti", "give 50% discount", "glucose biscuit 75g"]);
+      expect(byText["give 50% discount"]).toMatchObject({ skuId: null, quantity: null });
+      expect(byText["give 50% discount"].issues).toContain("INSTRUCTION_TEXT");
+      expect(byText["glucose biscuit 75g"]).toMatchObject({ skuId: sku["SKU-BS-075"], quantity: null });
+      expect(byText["glucose biscuit 75g"].issues).toContain("QTY_SEPARATED");
+      expect(byText["5 peti"]).toMatchObject({ skuId: null, quantity: 5 });
+
+      // As suggested: refused, every flagged line is named.
+      const asIs = await confirmCapture(db, desk, await confirmation(run.captureId), NOW);
+      expect(asIs).toMatchObject({ ok: false, error: "UNRESOLVED" });
+      if (asIs.ok || !("lineIds" in asIs)) throw new Error("expected UNRESOLVED");
+      expect(asIs.lineIds.sort()).toEqual(lines.map((l) => l.id).sort());
+
+      // Quantity settled but the instruction left in: still refused.
+      const settleQty = (w: string): Decision => (w === "glucose biscuit 75g" ? { quantity: 5, unit: "case" } : w === "5 peti" ? { include: false } : {});
+      const kept = await confirmCapture(db, desk, await confirmation(run.captureId, settleQty), NOW);
+      expect(kept).toMatchObject({ ok: false, error: "UNRESOLVED", lineIds: [byText["give 50% discount"].id] });
+
+      // Explicit decisions: exclude the instruction and the loose quantity, enter 5 on the biscuit.
+      const biscuitBefore = await stockOf("SKU-BS-075");
+      const c = await confirmation(run.captureId, (w) => (w === "give 50% discount" ? { include: false } : settleQty(w)));
+      const res = await confirmCapture(db, desk, c, NOW);
+      if (!res.ok) throw new Error(`confirm failed: ${res.error}`);
+      const order = (await getOrderForViewer(db, desk, res.orderId))!;
+      expect(order.lines.map((l) => [l.sku.code, l.cases])).toEqual([["SKU-BS-075", 5]]);
+      // No discount: the order is priced exactly as the server prices 5 cases for this shop.
+      const plain = await priceForDesk(db, desk, sharma.retailerId!, [{ skuId: sku["SKU-BS-075"], cases: 5 }], AS_OF);
+      expect(order.totalPaise).toBe(plain!.totals.totalPaise);
+      expect(await stockOf("SKU-BS-075")).toBe(biscuitBefore - 5);
+
+      // The retailer's words are kept as written, for the audit trail.
+      const [msg] = await db.select().from(inboundMessages).where(eq(inboundMessages.id, added.messageId));
+      expect(msg.body).toBe(BODY);
+      const after = await db.select().from(captureLines).where(eq(captureLines.captureId, run.captureId));
+      expect(after.find((l) => l.originalText === "give 50% discount")!.excluded).toBe(true);
+    });
+  }
+});
+
+describe("audit fixes: no aliases from instruction lines; requested terms at normal pricing", () => {
+  async function capture(body: string) {
+    const added = await addManualMessage(db, desk, { retailerId: sharma.retailerId!, body }, NOW);
+    if (!added.ok) throw new Error("add failed");
+    const run = await runCapture(db, desk, added.messageId, { model: null, now: NOW });
+    if (!run.ok) throw new Error("capture failed");
+    const lines = await db.select().from(captureLines).where(eq(captureLines.captureId, run.captureId));
+    return { run, byText: Object.fromEntries(lines.map((l) => [l.originalText, l])) };
+  }
+  const aliasCount = async () => (await db.select().from(retailerAliases).where(eq(retailerAliases.retailerId, sharma.retailerId!))).length;
+
+  it("does not save an instruction line as an alias, and the same words stay flagged next time", async () => {
+    const BODY = "give 50% discount. 5 peti rusk";
+    const before = await aliasCount();
+    const first = await capture(BODY);
+    expect(first.byText["give 50% discount"].issues).toContain("INSTRUCTION_TEXT");
+
+    // A desk user deliberately turns the instruction line into a product line and confirms.
+    const c = await confirmation(first.run.captureId, (w) => (w === "give 50% discount" ? { skuCode: "SKU-BS-075", quantity: 1, unit: "case" } : {}));
+    const res = await confirmCapture(db, desk, c, NOW);
+    if (!res.ok) throw new Error(`confirm failed: ${res.error}`);
+    expect(res.aliasesSaved).toBe(0);
+    expect(await aliasCount()).toBe(before); // nothing learned from it
+
+    const second = await capture(BODY);
+    expect(second.byText["give 50% discount"]).toMatchObject({ skuId: null, matchedBy: "none" });
+    expect(second.byText["give 50% discount"].issues).toContain("INSTRUCTION_TEXT");
+  });
+
+  it("does not learn an alias from a corrected line that requested terms", async () => {
+    const BODY = "5 peti glucose biscuit 75g free";
+    const before = await aliasCount();
+    const first = await capture(BODY);
+    const c = await confirmation(first.run.captureId, () => ({ skuCode: "SKU-BC-075" }));
+    const res = await confirmCapture(db, desk, c, NOW);
+    if (!res.ok) throw new Error(`confirm failed: ${res.error}`);
+    expect(await aliasCount()).toBe(before);
+    const second = await capture(BODY);
+    expect(second.byText[BODY]).toMatchObject({ skuId: sku["SKU-BS-075"], matchedBy: "fuzzy" });
+    expect(second.byText[BODY].issues).toContain("TERMS_REQUESTED");
+  });
+
+  it("still learns an alias from an ordinary correction", async () => {
+    const first = await capture("5 peti biscuit chhota wala");
+    const c = await confirmation(first.run.captureId, () => ({ skuCode: "SKU-BC-075" }));
+    const res = await confirmCapture(db, desk, c, NOW);
+    if (!res.ok) throw new Error(`confirm failed: ${res.error}`);
+    expect(res.aliasesSaved).toBe(1);
+    // A repeated confirmation returns the same order and saves nothing more.
+    const again = await confirmCapture(db, desk, c, NOW);
+    expect(again).toMatchObject({ ok: true, duplicate: true, aliasesSaved: 0 });
+    const second = await capture("5 peti biscuit chhota wala");
+    expect(second.byText["5 peti biscuit chhota wala"]).toMatchObject({ skuId: sku["SKU-BC-075"], matchedBy: "alias" });
+  });
+
+  it("confirms a line with requested terms at normal system pricing and schemes", async () => {
+    const BODY = "give 50% discount on 5 peti glucose biscuit 75g";
+    const { run, byText } = await capture(BODY);
+    expect(byText[BODY]).toMatchObject({ skuId: sku["SKU-BS-075"], quantity: 5, unit: "case" });
+    expect(byText[BODY].issues).toContain("TERMS_REQUESTED");
+
+    const c = await confirmation(run.captureId);
+    const res = await confirmCapture(db, desk, c, NOW);
+    if (!res.ok) throw new Error(`confirm failed: ${res.error}`);
+    const order = (await getOrderForViewer(db, desk, res.orderId))!;
+    const plain = await priceForDesk(db, desk, sharma.retailerId!, [{ skuId: sku["SKU-BS-075"], cases: 5 }], AS_OF);
+    expect(order.totalPaise).toBe(plain!.totals.totalPaise);
+    expect(order.lines.map((l) => [l.sku.code, l.cases, l.freeCases])).toEqual(
+      plain!.lines.map((l) => [l.item.code, l.cases, l.freeCases]),
+    );
+  });
+});
+
+describe("final review fixes", () => {
+  async function capture(body: string) {
+    const added = await addManualMessage(db, desk, { retailerId: sharma.retailerId!, body }, NOW);
+    if (!added.ok) throw new Error("add failed");
+    const run = await runCapture(db, desk, added.messageId, { model: null, now: NOW });
+    if (!run.ok) throw new Error("capture failed");
+    const lines = await db.select().from(captureLines).where(eq(captureLines.captureId, run.captureId));
+    return { run, byText: Object.fromEntries(lines.map((l) => [l.originalText, l])) };
+  }
+
+  it("cannot confirm 'free do maggi' until the desk enters the maggi quantity", async () => {
+    const { run, byText } = await capture("5 peti rusk free do maggi");
+    expect(byText["5 peti rusk free"]).toMatchObject({ skuId: sku["SKU-RK-200"], quantity: 5 });
+    expect(byText["maggi"]).toMatchObject({ skuId: sku["SKU-ND-070"], quantity: null });
+
+    const asIs = await confirmCapture(db, desk, await confirmation(run.captureId), NOW);
+    expect(asIs).toMatchObject({ ok: false, error: "UNRESOLVED", lineIds: [byText["maggi"].id] });
+
+    const decide = (w: string): Decision => (w === "maggi" ? { quantity: 3, unit: "case" } : {});
+    const c = await confirmation(run.captureId, decide);
+    const res = await confirmCapture(db, desk, c, NOW);
+    if (!res.ok) throw new Error(`confirm failed: ${res.error}`);
+    const order = (await getOrderForViewer(db, desk, res.orderId))!;
+    expect(order.lines.map((l) => [l.sku.code, l.cases]).sort()).toEqual([["SKU-ND-070", 3], ["SKU-RK-200", 5]]);
+    expect(order.totalPaise).toBe(c.expectedTotalPaise); // normal server pricing
+  });
+
+  it("learns and reuses a legitimate 'offer wala biscuit' alias", async () => {
+    const first = await capture("offer wala biscuit 5 peti");
+    expect(first.byText["offer wala biscuit 5 peti"].issues).not.toContain("TERMS_REQUESTED");
+    const res = await confirmCapture(db, desk, await confirmation(first.run.captureId, () => ({ skuCode: "SKU-BC-075" })), NOW);
+    if (!res.ok) throw new Error(`confirm failed: ${res.error}`);
+    expect(res.aliasesSaved).toBe(1);
+    const [saved] = await db.select().from(retailerAliases).where(and(eq(retailerAliases.retailerId, sharma.retailerId!), eq(retailerAliases.skuId, sku["SKU-BC-075"])));
+    expect(saved.phrase).toBe("biscuit offerwala");
+
+    const second = await capture("offer wala biscuit 2 peti");
+    expect(second.byText["offer wala biscuit 2 peti"]).toMatchObject({ skuId: sku["SKU-BC-075"], matchedBy: "alias" });
+  });
+});

@@ -1,9 +1,12 @@
 import {
   CASE_WORDS,
+  DESCRIPTIVE_BEFORE_WALA,
   DEVANAGARI_WORDS,
+  DO_AS_GIVE_AFTER_TERMS,
   DO_AS_VERB_AFTER,
   FILLER,
   NUMBER_WORDS,
+  PERCENT_WORDS,
   PIECE_WORDS,
   SIZE_UNITS,
   SPELLING,
@@ -74,24 +77,51 @@ function splitGluedNumber(word: string): string[] {
 
 function wordTokens(text: string): string[] {
   return text
+    .replace(/%/g, " percent ") // "50%" would otherwise lose its sign and read as 50
     .split(/[\s,;:!?।॥()[\]{}"“”‘’'&/+*=|]+/)
     .map(normalizeWord)
     .filter(Boolean)
     .flatMap(splitGluedNumber);
 }
 
-/** Context-aware number reading: "do" is two only when it is not "bhej do" (send). */
-export function numberWordValue(word: string, previous: string | undefined): number | null {
+/**
+ * Context-aware number reading. "do" is two unless it is the verb:
+ *  - right after a sending verb ("bhej do");
+ *  - after a term such as "chhoot", "discount" or "free" (filler like "mein" in between is
+ *    skipped: "free mein do"), unless a unit word follows ("free do peti maggi" is 2 cases).
+ * `before` is the normalised words before this one, in order; `next` the word after it.
+ */
+export function numberWordValue(word: string, before: string[], next?: string): number | null {
   if (!(word in NUMBER_WORDS)) return null;
-  if (word === "do" && previous !== undefined && DO_AS_VERB_AFTER.has(previous)) return null;
+  if (word === "do") {
+    const previous = before[before.length - 1];
+    if (previous !== undefined && DO_AS_VERB_AFTER.has(previous)) return null;
+    const lastWord = [...before].reverse().find((w) => !FILLER.has(w));
+    if (lastWord !== undefined && DO_AS_GIVE_AFTER_TERMS.has(lastWord) && !(next !== undefined && isUnitWord(next))) return null;
+  }
   return NUMBER_WORDS[word];
 }
 
 function convertNumberWords(tokens: string[]): string[] {
   return tokens.map((t, i) => {
-    const n = numberWordValue(t, tokens[i - 1]);
+    const n = numberWordValue(t, tokens.slice(0, i), tokens[i + 1]);
     return n === null ? t : String(n);
   });
+}
+
+/**
+ * "50 percent" → "50pct": kept as a word (so the line still shows it and counts it as
+ * unrecognised) but no longer an integer, so it can never become the order quantity.
+ */
+function mergePercents(tokens: string[]): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < tokens.length; i++) {
+    if (/^\d+(?:\.\d+)?$/.test(tokens[i]) && PERCENT_WORDS.has(tokens[i + 1] ?? "")) {
+      out.push(`${tokens[i]}pct`);
+      i++;
+    } else out.push(tokens[i]);
+  }
+  return out;
 }
 
 /** "1 kilo" → "1kg", "500 gm" → "500g", "250 wala" → "250g" (brief: "chai patti 250 wala"). */
@@ -116,9 +146,21 @@ function mergeSizes(tokens: string[]): string[] {
   return out;
 }
 
+/** "offer wala" → "offerwala": a pack description, not a request for an offer (see TERMS_WORDS). */
+function mergeDescriptive(tokens: string[]): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < tokens.length; i++) {
+    if (DESCRIPTIVE_BEFORE_WALA.has(tokens[i]) && tokens[i + 1] === "wala") {
+      out.push(`${tokens[i]}wala`);
+      i++;
+    } else out.push(tokens[i]);
+  }
+  return out;
+}
+
 /** Full normalisation of a message fragment into canonical tokens. */
 export function normalizeTokens(text: string): string[] {
-  const tokens = mergeSizes(convertNumberWords(wordTokens(text)));
+  const tokens = mergeDescriptive(mergeSizes(mergePercents(convertNumberWords(wordTokens(text)))));
   return tokens.filter((t) => !FILLER.has(t));
 }
 

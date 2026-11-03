@@ -38,6 +38,7 @@ export default async function DeskOrder({ params, searchParams }: PageProps<"/de
         <div className="mb-4">
           <Notice tone="accent" title="✓">
             {fill(d.createdOk, { number: order.number })}
+            {Number(sp.learned) > 0 && <> {fill(d.aliasesSaved, { n: Number(sp.learned) })}</>}
           </Notice>
         </div>
       )}

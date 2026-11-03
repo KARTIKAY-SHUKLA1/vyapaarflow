@@ -1,4 +1,4 @@
-import type { MatchContext, MatchResult } from "./match";
+import { SIZE_SIBLING_CAP, type MatchContext, type MatchResult } from "./match";
 import type { ParsedSegment } from "./parse";
 import type { CaptureIssue, CaptureLine, ConfidenceBand, OrderUnit, Unit } from "./types";
 
@@ -8,13 +8,19 @@ export type AnalysedSegment = {
   originalText: string;
   parsed: ParsedSegment;
   match: MatchResult;
+  /** Message-level issues found when the segment was analysed (QTY_SEPARATED, INSTRUCTION_TEXT, TERMS_REQUESTED). */
+  flags: CaptureIssue[];
 };
 
 const MAX_ALTERNATIVES = 2;
 const ISSUE_ORDER: CaptureIssue[] = [
   "NO_MATCH",
+  "INSTRUCTION_TEXT",
   "MODEL_INVALID_SKU",
   "MODEL_DISAGREES",
+  "SIZE_SIBLING",
+  "TERMS_REQUESTED",
+  "QTY_SEPARATED",
   "QTY_MISSING",
   "UNIT_UNCLEAR",
   "LOW_CONFIDENCE",
@@ -56,9 +62,14 @@ export function pickAlternatives(
 
 type LineDraft = Omit<CaptureLine, "confidenceBand" | "needsReview">;
 
-/** Derive value-based issues, the band and the review flag; keep model issues passed in. */
+/**
+ * Derive value-based issues, the band and the review flag; keep model issues passed in.
+ * A same-size sibling caps confidence below "high"; pieces always need review because
+ * orders are taken in cases.
+ */
 export function finalizeLine(draft: LineDraft): CaptureLine {
-  const confidence = draft.skuId === null ? 0 : Math.round(Math.min(100, Math.max(0, draft.confidence)));
+  const capped = draft.issues.includes("SIZE_SIBLING") ? Math.min(draft.confidence, SIZE_SIBLING_CAP) : draft.confidence;
+  const confidence = draft.skuId === null ? 0 : Math.round(Math.min(100, Math.max(0, capped)));
   const band = confidenceBand(confidence);
   const issues = new Set(draft.issues);
   if (draft.skuId === null) issues.add("NO_MATCH");
@@ -72,8 +83,13 @@ export function finalizeLine(draft: LineDraft): CaptureLine {
     confidenceBand: band,
     matchedBy: draft.skuId === null ? "none" : draft.matchedBy,
     issues: ordered,
-    needsReview: ordered.length > 0 || band !== "high",
+    needsReview: ordered.length > 0 || band !== "high" || draft.unit === "piece",
   };
+}
+
+/** SIZE_SIBLING when the chosen SKU is one of the equally-worded same-size siblings. */
+export function siblingIssues(skuId: string | null, match: MatchResult): CaptureIssue[] {
+  return skuId !== null && match.sizeSiblings.includes(skuId) ? ["SIZE_SIBLING"] : [];
 }
 
 /** The deterministic (rule-based) line for a segment. */
@@ -88,6 +104,6 @@ export function rulesLine(seg: AnalysedSegment, ctx: MatchContext): CaptureLine 
     unit: resolveUnit(seg.parsed, seg.match.aliasUnit),
     confidence: seg.match.confidence,
     matchedBy: seg.match.matchedBy,
-    issues: [],
+    issues: [...seg.flags, ...siblingIssues(skuId, seg.match)],
   });
 }

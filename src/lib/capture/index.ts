@@ -1,4 +1,4 @@
-export { aliasPhrase } from "./alias";
+export { aliasEligible, aliasPhrase } from "./alias";
 export { CircuitBreaker } from "./breaker";
 export { captureOrder, MAX_MESSAGE_CHARS, type CaptureOptions } from "./capture";
 export {

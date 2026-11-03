@@ -125,3 +125,52 @@ describe("model output guards", () => {
     expect(line).toMatchObject({ confidenceBand: "high", needsReview: false, issues: [] });
   });
 });
+
+describe("retailer history never authorises an unrelated SKU (eval F5)", () => {
+  const detergentHistory = [{ skuId: "SKU-DT-4KG", timesOrdered: 14, lastCases: 2 }];
+
+  it("rejects a past-order detergent SKU chosen for a biscuit message", async () => {
+    const line = await viaModel(
+      "10 peti glucose biscuit 75g",
+      { sku_code: "SKU-DT-4KG", alternative_codes: ["SKU-DT-4KG"], quantity: 10, unit: "case", confidence: 0.99 },
+      { history: detergentHistory },
+    );
+    expect(line).toMatchObject({ skuId: "SKU-BS-075", matchedBy: "fuzzy", quantity: 10, unit: "case" });
+    expect(line.issues).toContain("MODEL_INVALID_SKU");
+    expect(line.alternatives).not.toContain("SKU-DT-4KG");
+  });
+
+  it("still accepts a past SKU that is one of the segment's candidates", async () => {
+    const line = await viaModel(
+      "5 peti biscuit chhota",
+      { sku_code: "SKU-BC-075", quantity: 5, unit: "case", confidence: 0.9 },
+      { history: [{ skuId: "SKU-BC-075", timesOrdered: 9, lastCases: 5 }] },
+    );
+    expect(line).toMatchObject({ skuId: "SKU-BC-075", matchedBy: "llm" });
+    expect(line.issues).not.toContain("MODEL_INVALID_SKU");
+  });
+
+  it("gives a line with no candidates no SKU, whatever the model picks from history", async () => {
+    const line = await viaModel(
+      "give 50% discount",
+      { sku_code: "SKU-DT-4KG", quantity: 50, unit: "unknown", confidence: 0.95 },
+      { history: detergentHistory },
+    );
+    expect(line).toMatchObject({ skuId: null, quantity: null, needsReview: true });
+  });
+});
+
+describe("same-size sibling on the model path", () => {
+  it("keeps SIZE_SIBLING and a below-high confidence when the model agrees on 'biscuit chhota'", async () => {
+    const line = await viaModel("5 peti biscuit chhota", { sku_code: "SKU-BS-075", quantity: 5, unit: "case", confidence: 0.99 });
+    expect(line).toMatchObject({ skuId: "SKU-BS-075", matchedBy: "llm", confidenceBand: "medium", needsReview: true });
+    expect(line.issues).toContain("SIZE_SIBLING");
+    expect(line.confidence).toBeLessThanOrEqual(79);
+  });
+
+  it("does not flag a specific match the model agrees with", async () => {
+    const line = await viaModel("5 peti glucose biscuit 75g", { sku_code: "SKU-BS-075", quantity: 5, unit: "case", confidence: 0.95 });
+    expect(line.issues).toEqual([]);
+    expect(line.confidenceBand).toBe("high");
+  });
+});

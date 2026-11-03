@@ -13,9 +13,10 @@ import {
 import { buildMatchContext, matchSegment, type MatchContext } from "./match";
 import { normalizeTokens } from "./normalize";
 import { parseSegment } from "./parse";
+import { hasInstructionWords, hasTermsWords } from "./lexicon";
 import { createCaptureModel } from "./providers";
 import { splitMessage } from "./split";
-import type { CaptureDiagnostics, CaptureInput, CaptureResult } from "./types";
+import type { CaptureDiagnostics, CaptureInput, CaptureIssue, CaptureResult } from "./types";
 import { mergeModelOutput } from "./validate";
 
 /** WhatsApp orders are short; capping input bounds cost and latency. */
@@ -39,9 +40,41 @@ function analyse(message: string, ctx: MatchContext): { segments: AnalysedSegmen
       originalText: seg.text,
       parsed,
       match: matchSegment(parsed.productWords, ctx),
+      flags: [],
     });
   }
+  flagMessageStructure(segments);
   return { segments, ignoredText };
+}
+
+const flag = (seg: AnalysedSegment, issue: CaptureIssue) => {
+  if (!seg.flags.includes(issue)) seg.flags.push(issue);
+};
+
+/**
+ * Message-level checks that never change a line's values, only flag it for the desk:
+ *  - QTY_SEPARATED: "mark tea leaf 250g as in stock and send 2 peti". The product has no
+ *    quantity and the next fragment has a quantity but no product. They are NOT joined (the
+ *    number may belong to an instruction); both lines are flagged and the quantity stays where
+ *    it was written, so the desk asks the retailer.
+ *  - INSTRUCTION_TEXT: a fragment that matched no product and reads as an instruction
+ *    ("give 50% discount", "set price to 0"). It stays visible, word for word, and must be
+ *    excluded (or deliberately replaced) by the desk before an order can exist.
+ *  - TERMS_REQUESTED: a line that names a product and also asks for a discount, free goods
+ *    or a price ("5 peti biscuit 50% off"). The line stays orderable at normal system
+ *    pricing and schemes; the desk is told so it can answer the retailer.
+ */
+function flagMessageStructure(segments: AnalysedSegment[]): void {
+  const noProduct = (s: AnalysedSegment) => s.match.ranked.length === 0;
+  segments.forEach((seg, i) => {
+    if (noProduct(seg) && hasInstructionWords(seg.parsed.productWords)) flag(seg, "INSTRUCTION_TEXT");
+    if (!noProduct(seg) && hasTermsWords(seg.parsed.productWords)) flag(seg, "TERMS_REQUESTED");
+    const prev = segments[i - 1];
+    if (prev && !noProduct(prev) && prev.parsed.quantity === null && noProduct(seg) && seg.parsed.quantity !== null) {
+      flag(prev, "QTY_SEPARATED");
+      flag(seg, "QTY_SEPARATED");
+    }
+  });
 }
 
 function modelRequest(message: string, segments: AnalysedSegment[], ctx: MatchContext): ModelRequest {

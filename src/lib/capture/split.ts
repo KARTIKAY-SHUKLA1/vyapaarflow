@@ -1,4 +1,4 @@
-import { EDGE_FILLER, FILLER, SIZE_UNITS } from "./lexicon";
+import { EDGE_FILLER, FILLER, PERCENT_WORDS, SIZE_UNITS } from "./lexicon";
 import { isInteger, isSizeToken, isUnitWord, normalizeWord, numberWordValue } from "./normalize";
 
 /** A piece of the message that should hold one item, with its exact original words. */
@@ -23,14 +23,16 @@ function pieces(message: string): { text: string; start: number }[] {
 
 function tokens(piece: { text: string; start: number }): Token[] {
   return [...piece.text.matchAll(/\S+/g)]
-    .map((m) => ({ raw: m[0], norm: normalizeWord(m[0]), start: piece.start + m.index!, end: piece.start + m.index! + m[0].length }))
+    .map((m) => ({ raw: m[0], norm: m[0] === "%" ? "percent" : normalizeWord(m[0]), start: piece.start + m.index!, end: piece.start + m.index! + m[0].length }))
     .filter((t) => t.norm !== "");
 }
 
 function numberAt(toks: Token[], i: number): number | null {
   const t = toks[i].norm;
+  // "50%", "50 %", "50 percent" is a rate, not a quantity: it never starts a new item.
+  if (toks[i].raw.endsWith("%") || PERCENT_WORDS.has(toks[i + 1]?.norm ?? "")) return null;
   if (isInteger(t)) return Number(t);
-  return numberWordValue(t, toks[i - 1]?.norm);
+  return numberWordValue(t, toks.slice(0, i).map((x) => x.norm), toks[i + 1]?.norm);
 }
 
 /** True when the number is a pack size ("1 kilo", "250 wala"), not a quantity. */
@@ -44,8 +46,19 @@ function isProductWord(norm: string): boolean {
 }
 
 /**
+ * "do" read as "give" ("5 peti rusk free do maggi") with a product after it: the next
+ * product is a new item. It starts with no quantity, so the "do" is never turned into 2
+ * and the first item's quantity never moves onto it; the desk asks.
+ */
+function isGiveBoundary(toks: Token[], i: number): boolean {
+  const next = toks[i + 1];
+  return toks[i].norm === "do" && numberAt(toks, i) === null && next !== undefined && isProductWord(next.norm);
+}
+
+/**
  * Split "5 peti biscuit 2 peti surf" into two items when the retailer used no
- * separator: a new quantity after a group that already has quantity and product.
+ * separator: a new quantity after a group that already has quantity and product,
+ * or a product after a "give" do (see isGiveBoundary).
  */
 function splitOnQuantities(toks: Token[]): Token[][] {
   const groups: Token[][] = [];
@@ -63,6 +76,12 @@ function splitOnQuantities(toks: Token[]): Token[][] {
     current.push(tok);
     if (isQty) hasQty = true;
     else if (isProductWord(tok.norm)) hasProduct = true;
+    if (hasProduct && isGiveBoundary(toks, i)) {
+      groups.push(current);
+      current = [];
+      hasQty = false;
+      hasProduct = false;
+    }
   });
   if (current.length > 0) groups.push(current);
   return groups;

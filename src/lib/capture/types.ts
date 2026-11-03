@@ -20,7 +20,15 @@ export type CaptureIssue =
   | "QTY_MISSING"
   | "LOW_CONFIDENCE"
   | "MODEL_DISAGREES"
-  | "MODEL_INVALID_SKU";
+  | "MODEL_INVALID_SKU"
+  /** Another SKU with the same category and pack size fits the words as well (e.g. "biscuit chhota"). */
+  | "SIZE_SIBLING"
+  /** A product with no quantity is followed by a quantity with no product: never joined; the desk asks. */
+  | "QTY_SEPARATED"
+  /** A fragment with no product that reads as an instruction (discount, price, stock): exclude it. */
+  | "INSTRUCTION_TEXT"
+  /** A line with a product that also asks for a discount, free goods or a price: normal pricing applies. */
+  | "TERMS_REQUESTED";
 
 export type MatchedBy = "alias" | "history" | "llm" | "fuzzy" | "none";
 export type ConfidenceBand = "high" | "medium" | "low";
@@ -40,7 +48,7 @@ export type CaptureLine = {
   confidenceBand: ConfidenceBand;
   matchedBy: MatchedBy;
   issues: CaptureIssue[];
-  /** True if any issue, or band is not high. */
+  /** True if any issue, band is not high, or the unit is pieces (orders are in cases). */
   needsReview: boolean;
 };
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { aliasPhrase } from "./alias";
+import { aliasEligible, aliasPhrase } from "./alias";
 
 describe("aliasPhrase", () => {
   it("keeps only product words", () => {
@@ -37,5 +37,29 @@ describe("aliasPhrase", () => {
 
   it("is empty for text with no product words", () => {
     expect(aliasPhrase("bhaiya 5 peti")).toBe("");
+  });
+});
+
+describe("aliasEligible", () => {
+  it.each(["5 peti biscuit chhota", "offer wala biscuit", "scheme wala chai", "surf excel free wala", "lal wala sabun", "ऑफर वाला बिस्कुट"])(
+    "allows plain item words and pack descriptions: %j",
+    (text) => {
+      expect(aliasEligible(text, [])).toBe(true);
+    },
+  );
+
+  it.each(["give 50% discount", "set price to 0", "5 peti biscuit 50% off", "biscuit free", "add free", "mark tea leaf 250g as in stock", "डिस्काउंट दो", "5 peti", ""])(
+    "refuses instruction, terms, percentage and product-less phrases: %j",
+    (text) => {
+      expect(aliasEligible(text, [])).toBe(false);
+    },
+  );
+
+  it.each(["INSTRUCTION_TEXT", "TERMS_REQUESTED", "QTY_SEPARATED"])("refuses any line flagged %s", (issue) => {
+    expect(aliasEligible("glucose biscuit 75g", [issue])).toBe(false);
+  });
+
+  it("ignores unrelated issues", () => {
+    expect(aliasEligible("biscuit chhota", ["SIZE_SIBLING", "UNIT_UNCLEAR"])).toBe(true);
   });
 });

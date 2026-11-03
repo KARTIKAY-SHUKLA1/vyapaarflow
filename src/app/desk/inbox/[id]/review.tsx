@@ -7,6 +7,7 @@ import { ProductImage } from "@/components/product-image";
 import { SubmitButton } from "@/components/submit-button";
 import { Badge, Button, ButtonLink, Card, cx, EmptyState, Notice, Skeleton } from "@/components/ui";
 import { usePricing } from "@/components/use-pricing";
+import { aliasEligible } from "@/lib/capture/alias";
 import type { captureLines, captures, inboundMessages } from "@/db/schema";
 import { formatDateTime } from "@/lib/dates";
 import { fill, type Lang, type Messages } from "@/lib/i18n/messages";
@@ -38,6 +39,9 @@ type Props = {
   shops: { id: string; code: string; shopName: string; area: string }[];
 };
 
+/** Issues that mean "check the product": the line needs a decision until the desk keeps or changes it. */
+const PRODUCT_CHECK = ["SIZE_SIBLING", "MODEL_DISAGREES", "MODEL_INVALID_SKU", "LOW_CONFIDENCE"];
+
 function band(confidence: number) {
   return confidence >= 80 ? "high" : confidence >= 50 ? "medium" : "low";
 }
@@ -50,6 +54,8 @@ export function Review({ lang, d, shopT, message, capture, lines, catalogue, ord
   );
   const [checked, setChecked] = useState(false);
   const [flagged, setFlagged] = useState<string[]>([]);
+  const [kept, setKept] = useState<string[]>([]);
+  const [noted, setNoted] = useState<string[]>([]);
   const [problem, setProblem] = useState<string | null>(null);
   const [pending, start] = useTransition();
   const [idempotencyKey] = useState(uuid);
@@ -79,12 +85,20 @@ export function Review({ lang, d, shopT, message, capture, lines, catalogue, ord
     return x.include && (!x.skuId || !x.quantity || x.unit !== "case");
   });
   const includedCount = lines.filter((l) => decisions[l.id].include).length;
+  // A flagged suggestion (same-size sibling, AI disagreement, low confidence) stays unsettled
+  // until the desk changes the product or explicitly keeps it.
+  const productUnsettled = (l: Line) => {
+    const x = decisions[l.id];
+    return !!x.skuId && x.skuId === l.skuId && !kept.includes(l.id) && (l.issues ?? []).some((i) => PRODUCT_CHECK.includes(i));
+  };
+  // The retailer asked for a discount, free goods or a price: normal pricing applies once the desk has noted it.
+  const termsUnnoted = (l: Line) => (l.issues ?? []).includes("TERMS_REQUESTED") && !noted.includes(l.id);
   // Review summary: which lines are ready, which need the desk, which are left out.
   const lineState = (l: Line): "ready" | "attention" | "excluded" => {
     const x = decisions[l.id];
     if (!x.include) return "excluded";
     const p = x.skuId ? priced.get(x.skuId) : undefined;
-    return !x.skuId || !x.quantity || x.unit !== "case" || flagged.includes(l.id) || (p && !p.orderable) ? "attention" : "ready";
+    return !x.skuId || !x.quantity || x.unit !== "case" || flagged.includes(l.id) || (p && !p.orderable) || productUnsettled(l) || termsUnnoted(l) ? "attention" : "ready";
   };
   const states = lines.map((l) => ({ id: l.id, state: lineState(l) }));
   const attentionIds = states.filter((x) => x.state === "attention").map((x) => x.id);
@@ -134,7 +148,8 @@ export function Review({ lang, d, shopT, message, capture, lines, catalogue, ord
           confirmed: true,
         });
         if (res.ok) {
-          router.push(`/desk/orders/${res.orderId}?created=1`);
+          // The order page reports how many shop words the server actually saved.
+          router.push(`/desk/orders/${res.orderId}?created=1${res.aliasesSaved ? `&learned=${res.aliasesSaved}` : ""}`);
           return;
         }
         if ("pricing" in res) accept(res.pricing);
@@ -309,6 +324,8 @@ export function Review({ lang, d, shopT, message, capture, lines, catalogue, ord
                 shopT={shopT}
                 lang={lang}
                 state={lineState(l)}
+                onKeep={productUnsettled(l) ? () => setKept((k) => [...k, l.id]) : undefined}
+                onNoteTerms={termsUnnoted(l) ? () => setNoted((n) => [...n, l.id]) : undefined}
               />
             ))}
           </ol>
@@ -393,6 +410,8 @@ function ReviewLine({
   shopT,
   lang,
   state,
+  onKeep,
+  onNoteTerms,
 }: {
   line: Line;
   decision: Decision;
@@ -405,11 +424,18 @@ function ReviewLine({
   shopT: Messages["shop"];
   lang: Lang;
   state: "ready" | "attention" | "excluded";
+  /** Set while a flagged suggestion is unsettled: keeps the suggested product. */
+  onKeep?: () => void;
+  /** Set while a TERMS_REQUESTED warning is not yet acknowledged. */
+  onNoteTerms?: () => void;
 }) {
   const b = band(line.confidence);
   const sku = decision.skuId ? skuById.get(decision.skuId) : undefined;
   // Mirrors the server: a changed product or a unit settled to cases becomes an alias for this shop.
   const corrected = decision.include && !!decision.skuId && (decision.skuId !== line.skuId || (line.unit !== "case" && decision.unit === "case"));
+  // Same rule the server uses when it saves aliases: instruction text, requested terms and
+  // separated quantities are corrected for this order only.
+  const learnable = corrected && aliasEligible(line.originalText, line.issues);
   const suggestions = [line.skuId, line.alt1SkuId, line.alt2SkuId].filter((x): x is string => !!x && skuById.has(x));
   const categories = [...new Set(catalogue.map((c) => c.category))];
   const issues = (line.issues ?? []) as (keyof D["issues"])[];
@@ -454,6 +480,28 @@ function ReviewLine({
               <li key={i}>{d.issues[i] ?? i}</li>
             ))}
           </ul>
+          {editable && decision.include && (onKeep || onNoteTerms) && (
+            <div className="ml-auto flex shrink-0 flex-col gap-1.5 self-start">
+              {onKeep && (
+                <button
+                  type="button"
+                  onClick={onKeep}
+                  className="h-9 rounded-md border border-warn/40 bg-surface px-3 text-[14px] font-medium text-warn hover:bg-warn-soft"
+                >
+                  {d.keepProduct}
+                </button>
+              )}
+              {onNoteTerms && (
+                <button
+                  type="button"
+                  onClick={onNoteTerms}
+                  className="h-9 rounded-md border border-warn/40 bg-surface px-3 text-[14px] font-medium text-warn hover:bg-warn-soft"
+                >
+                  {d.termsNoted}
+                </button>
+              )}
+            </div>
+          )}
         </div>
       )}
 
@@ -585,7 +633,7 @@ function ReviewLine({
       )}
 
       <div className="mt-2 flex flex-wrap gap-2">
-        {corrected && <Badge tone="info">{d.corrected}</Badge>}
+        {corrected && <Badge tone="info">{learnable ? d.corrected : d.correctedThisOrder}</Badge>}
       </div>
     </li>
   );

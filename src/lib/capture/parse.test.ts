@@ -49,3 +49,23 @@ describe("parseSegment", () => {
     expect(parse("5 peti biscuit 3").numbers).toEqual([5, 3]);
   });
 });
+
+describe("percentages are never quantities", () => {
+  it.each(["give 50% discount", "50 % off", "50 percent off", "50 pratishat chhoot", "50 प्रतिशत छूट", "50percent"])(
+    "%s → no quantity",
+    (text) => {
+      expect(parse(text)).toMatchObject({ quantity: null, numbers: [] });
+    },
+  );
+
+  it("keeps the real quantity next to a percentage", () => {
+    expect(parse("5 peti rusk 10% scheme")).toMatchObject({ quantity: 5, numbers: [5], unit: "case" });
+  });
+});
+
+describe("dabba", () => {
+  it("does not read डिब्बा as a case: the desk asks", () => {
+    expect(parse("5 डिब्बा rusk")).toMatchObject({ quantity: 5, unit: "unknown" });
+    expect(parse("5 dabba rusk")).toMatchObject({ quantity: 5, unit: "unknown" });
+  });
+});

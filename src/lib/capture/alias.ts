@@ -1,5 +1,7 @@
+import { hasInstructionWords } from "./lexicon";
 import { normalizeTokens } from "./normalize";
 import { parseSegment } from "./parse";
+import type { CaptureIssue } from "./types";
 
 /** De-duplicated, sorted product words: word order and repeats never create a second key. */
 export function aliasKey(productWords: string[]): string {
@@ -15,4 +17,20 @@ export function aliasKey(productWords: string[]): string {
  */
 export function aliasPhrase(originalSegmentText: string): string {
   return aliasKey(parseSegment(normalizeTokens(originalSegmentText)).productWords);
+}
+
+/** Lines whose words must stay flagged on the next capture, so a correction is never learned. */
+const NOT_ALIASABLE: ReadonlySet<string> = new Set<CaptureIssue>(["INSTRUCTION_TEXT", "TERMS_REQUESTED", "QTY_SEPARATED"]);
+
+/**
+ * Whether a desk correction of this line may be saved as a shop alias. Used by the server
+ * when it saves aliases and by the review screen to say whether it will; one rule for both.
+ * Allowed: plain item words, including pack descriptions such as "offer wala biscuit".
+ * Refused: instruction text, requested terms, a separated quantity, or any phrase with an
+ * instruction word or a percentage ("give 50% discount", "set price").
+ */
+export function aliasEligible(originalSegmentText: string, issues: readonly string[] | null | undefined): boolean {
+  if ((issues ?? []).some((i) => NOT_ALIASABLE.has(i))) return false;
+  const phrase = aliasPhrase(originalSegmentText);
+  return phrase !== "" && !hasInstructionWords(phrase.split(" "));
 }

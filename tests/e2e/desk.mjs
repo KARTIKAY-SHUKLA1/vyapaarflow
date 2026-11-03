@@ -83,8 +83,22 @@ export default async function desk(browser) {
   c.ok("out-of-stock tea flagged, not accepted", t.includes("Out of stock — exclude or replace"));
   c.ok("create is disabled until a human confirms", await (await page.waitForSelector(createButton)).evaluate((b) => b.disabled));
 
-  // Desk correction: this shop's "biscuit chhota" is the cream biscuit; exclude the tea.
+  // "biscuit chhota" fits glucose and cream 75 g equally: the suggestion stays, but needs a decision.
   const biscuit = await lineFor(page, "5 peti biscuit chhota");
+  const lineText = (el) => el.evaluate((li) => li.innerText);
+  let bt = await lineText(biscuit);
+  c.ok(
+    "same-size sibling flagged: Medium, needs a decision, glucose still suggested",
+    bt.includes("Needs a decision") && bt.includes("Another product has the same pack size") && /Medium · \d+%/.test(bt) &&
+      (await biscuit.$eval("select", (s) => s.selectedOptions[0].textContent)).includes("SKU-BS-075"),
+  );
+  c.ok("a specific match stays ready", (await lineText(await lineFor(page, "2 peti washing powder 1 kilo"))).includes("Ready"));
+  await click(biscuit, "::-p-text(Keep this product)");
+  await settle(300);
+  bt = await lineText(biscuit);
+  c.ok("keeping the suggested product settles the line", bt.includes("Ready") && !bt.includes("Keep this product"));
+
+  // Desk correction: this shop's "biscuit chhota" is the cream biscuit; exclude the tea.
   await biscuit.$eval("select", (s) => {
     const opt = [...s.options].find((o) => o.textContent.includes("SKU-BC-075"));
     s.value = opt.value;
@@ -96,12 +110,13 @@ export default async function desk(browser) {
   await teaInclude.click();
   await settle(1500);
   t = await mainText(page);
-  c.ok("correction will be remembered for this shop", t.includes("Corrected — will be remembered for this shop"));
+  c.ok("correction will be saved for this shop", t.includes("Corrected — will be saved for this shop when you create the order"));
   const creamBefore = await stockOf("SKU-BC-075");
   const first = await confirmAndCreate(page);
   c.ok("order created only after explicit confirmation", first.created && !!first.number, JSON.stringify(first));
   t = await mainText(page);
   c.ok("order page: created banner + capture in history", t.includes("created from the message") && t.includes("Created from AI capture (desk confirmed)"));
+  c.ok("order page confirms the shop word the server saved", t.includes("Saved as this shop's words: 1."));
   if (db) c.eq("cream biscuit stock reserved (5 cases)", await stockOf("SKU-BC-075"), creamBefore - 5);
   await shot(page, "d04-order-created");
 
@@ -121,7 +136,69 @@ export default async function desk(browser) {
   t = await mainText(page);
   c.ok("pasted message is read for that shop", t.includes("“3 peti biscuit chhota”"));
   c.ok("saved alias used (shop's saved word → cream biscuit)", t.includes("shop's saved word") && (await (await lineFor(page, "3 peti biscuit chhota")).$eval("select", (s) => s.selectedOptions[0].textContent)).includes("SKU-BC-075"));
+  c.ok("a saved alias is not flagged as a same-size sibling", !(await (await lineFor(page, "3 peti biscuit chhota")).evaluate((li) => li.innerText)).includes("Another product has the same pack size"));
   await shot(page, "d05-alias");
+
+  // ── Instruction text and a separated quantity: shown word for word, never joined, never ordered as-is ──
+  await page.goto(`${BASE}/desk/inbox`, { waitUntil: "networkidle0" });
+  await page.select('select[name="retailerId"]', await page.$eval('select[name="retailerId"]', (s) => [...s.options].find((o) => o.textContent.includes("Sharma Kirana Store")).value));
+  await page.type('textarea[name="body"]', "give 50% discount. glucose biscuit 75g, 5 peti");
+  await click(page, "::-p-text(Add and review)");
+  await page.waitForFunction(() => /^\/desk\/inbox\/[^/]+$/.test(location.pathname), { timeout: 20000 });
+  await settle(1800);
+  t = await mainText(page);
+  c.ok("instruction kept as its own line and labelled", t.includes("“give 50% discount”") && t.includes("Looks like an instruction, not an item"));
+  c.ok("separated quantity flagged on both lines, not joined", t.includes("“glucose biscuit 75g”") && t.includes("“5 peti”") && (t.match(/The quantity may be written in another part of the message/g) ?? []).length === 2);
+  const qtyOf = async (li) => li.$eval('input[inputmode="numeric"]', (i) => i.value);
+  const biscuitLine = await lineFor(page, "“glucose biscuit 75g”");
+  c.eq("biscuit quantity left empty for the desk", await qtyOf(biscuitLine), "");
+  await click(page, checkEveryLine);
+  await settle(300);
+  c.ok("cannot create while instruction and quantity are unresolved", await (await page.waitForSelector(createButton)).evaluate((b) => b.disabled));
+  {
+    // Choosing a product for the instruction line is allowed, but it is never promised as a shop word.
+    const instr = await lineFor(page, "“give 50% discount”");
+    await instr.$eval("select", (s) => {
+      s.value = [...s.options].find((o) => o.textContent.includes("SKU-RK-200")).value;
+      s.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await settle(400);
+    const it = await instr.evaluate((li) => li.innerText);
+    c.ok("instruction line correction is for this order only", it.includes("Corrected for this order only") && !it.includes("will be saved for this shop"));
+  }
+  for (const words of ["“give 50% discount”", "“5 peti”"]) {
+    const include = await (await lineFor(page, words)).waitForSelector("::-p-xpath(.//label[contains(., 'Include in order')]/input)");
+    await include.evaluate((e) => e.scrollIntoView({ block: "center" }));
+    await include.click();
+    await settle(200);
+  }
+  await biscuitLine.$eval('input[inputmode="numeric"]', (i) => i.scrollIntoView({ block: "center" }));
+  await (await biscuitLine.$('input[inputmode="numeric"]')).type("5");
+  await (await biscuitLine.waitForSelector("::-p-xpath(.//button[@role='radio'][normalize-space(.)='Cases'])")).click();
+  await settle(1500);
+  await click(page, checkEveryLine);
+  await settle(300);
+  c.ok("after the desk excludes the instruction and enters the quantity, create is enabled", !(await (await page.waitForSelector(createButton)).evaluate((b) => b.disabled)));
+  await shot(page, "d05b-instruction");
+
+  // ── Requested terms on a product line: warned, priced normally, confirmable after the desk notes it ──
+  await page.goto(`${BASE}/desk/inbox`, { waitUntil: "networkidle0" });
+  await page.select('select[name="retailerId"]', await page.$eval('select[name="retailerId"]', (s) => [...s.options].find((o) => o.textContent.includes("Sharma Kirana Store")).value));
+  await page.type('textarea[name="body"]', "5 peti glucose biscuit 75g 50% off");
+  await click(page, "::-p-text(Add and review)");
+  await page.waitForFunction(() => /^\/desk\/inbox\/[^/]+$/.test(location.pathname), { timeout: 20000 });
+  await settle(1800);
+  const termsLine = await lineFor(page, "“5 peti glucose biscuit 75g 50% off”");
+  let tl = await termsLine.evaluate((li) => li.innerText);
+  c.ok("requested terms warned, line needs a decision", tl.includes("The retailer asked for a discount, free goods or a price") && tl.includes("Needs a decision"));
+  c.ok("requested terms line is priced at the normal case price", /₹[\d,]+\.\d\d \/ case excl\. GST/.test(tl));
+  await click(termsLine, "::-p-text(Noted: use normal pricing)");
+  await settle(300);
+  tl = await termsLine.evaluate((li) => li.innerText);
+  c.ok("noting the terms settles the line", tl.includes("Ready") && !tl.includes("Noted: use normal pricing"));
+  await click(page, checkEveryLine);
+  await settle(300);
+  c.ok("order can be created at normal pricing after the warning", !(await (await page.waitForSelector(createButton)).evaluate((b) => b.disabled)));
 
   // ── Hindi message: unit not written → must be settled to cases before an order can exist ──
   await openMessage(page, "भैया 10 पेटी");

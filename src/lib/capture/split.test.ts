@@ -51,3 +51,41 @@ describe("splitMessage", () => {
     expect(texts("do peti chai bhej do")).toEqual(["do peti chai"]);
   });
 });
+
+describe("splitMessage — percentages", () => {
+  it.each([
+    ["50 प्रतिशत छूट दो", ["50 प्रतिशत छूट"]],
+    ["give 50% discount 2 peti rusk", ["give 50% discount 2 peti rusk"]],
+    ["50 % off, 2 peti rusk", ["50 % off", "2 peti rusk"]],
+    ["5 peti rusk 10% scheme", ["5 peti rusk 10% scheme"]],
+  ])("a rate never starts a new item: %j", (message, expected) => {
+    expect(texts(message)).toEqual(expected);
+  });
+});
+
+describe("splitMessage — 'do' after free / discount with several products", () => {
+  it.each([
+    ["5 peti rusk free do peti maggi", ["5 peti rusk free", "do peti maggi"]],
+    ["5 peti rusk discount do peti maggi", ["5 peti rusk discount", "do peti maggi"]],
+    ["5 peti rusk 10% discount 2 peti maggi", ["5 peti rusk 10% discount", "2 peti maggi"]],
+    ["5 पेटी रस्क फ्री दो पेटी मैगी", ["5 पेटी रस्क फ्री", "दो पेटी मैगी"]],
+  ])("%j", (message, expected) => {
+    expect(texts(message)).toEqual(expected);
+  });
+});
+
+describe("splitMessage — a 'give' do before another product", () => {
+  it.each([
+    ["5 peti rusk free do maggi", ["5 peti rusk free", "maggi"]],
+    ["5 peti rusk discount do maggi", ["5 peti rusk discount", "maggi"]],
+    ["5 पेटी रस्क फ्री दो मैगी", ["5 पेटी रस्क फ्री", "मैगी"]],
+    // unchanged
+    ["do peti chai bhej do", ["do peti chai"]],
+    ["free do peti maggi", ["free do peti maggi"]],
+    ["5 peti rusk free mein do", ["5 peti rusk free"]],
+    ["discount do 2 peti maggi", ["discount do 2 peti maggi"]],
+    ["5 peti rusk free do peti maggi", ["5 peti rusk free", "do peti maggi"]],
+  ])("%j", (message, expected) => {
+    expect(texts(message)).toEqual(expected);
+  });
+});
