@@ -1,0 +1,84 @@
+{
+  "stamp": "2026-11-03T09:03:07.230Z",
+  "datasetSha256": "750f4514423f0f6aa92673e67a595a74b27201b3938779f757cbd689a401401e",
+  "checks": [
+    {
+      "id": "F1",
+      "name": "model timeout → labelled rules fallback after the 12 s budget",
+      "pass": true,
+      "detail": "{\"engine\":\"rules\",\"reason\":\"model_timeout\",\"ms\":12025}"
+    },
+    {
+      "id": "F2",
+      "name": "provider 503 → labelled rules fallback",
+      "pass": true,
+      "detail": "{\"reason\":\"model_error\",\"ms\":14}"
+    },
+    {
+      "id": "F3",
+      "name": "invalid output shape → labelled rules fallback",
+      "pass": true,
+      "detail": "model_invalid_output"
+    },
+    {
+      "id": "F4",
+      "name": "invented SKU, unwritten quantity, guessed unit and price fields are all rejected",
+      "pass": true,
+      "detail": "{\"sku\":\"SKU-BS-075\",\"qty\":10,\"unit\":\"unknown\",\"issues\":[\"MODEL_INVALID_SKU\",\"UNIT_UNCLEAR\"],\"alts\":[\"SKU-BS-200\",\"SKU-BC-075\"]}"
+    },
+    {
+      "id": "F5",
+      "name": "real catalogue SKU that was not a candidate for the line is rejected",
+      "pass": true,
+      "detail": "{\"sku\":\"SKU-BS-075\",\"issues\":[\"MODEL_INVALID_SKU\",\"UNIT_UNCLEAR\"]}"
+    },
+    {
+      "id": "F6",
+      "name": "model disagreeing with the rules is capped at 70 and flagged MODEL_DISAGREES",
+      "pass": true,
+      "detail": "{\"sku\":\"SKU-BC-075\",\"confidence\":70,\"issues\":[\"MODEL_DISAGREES\",\"SIZE_SIBLING\"],\"rulesPick\":\"SKU-BS-075\"}"
+    },
+    {
+      "id": "F7",
+      "name": "after repeated failures the AI is paused: no model call, labelled model_paused",
+      "pass": true,
+      "detail": "{\"reason\":\"model_paused\",\"callsDuringPause\":0}"
+    },
+    {
+      "id": "E1",
+      "name": "no explicit 'checked every line' tick → refused",
+      "pass": true,
+      "detail": "{\"ok\":false,\"error\":\"INVALID_INPUT\"}"
+    },
+    {
+      "id": "E2",
+      "name": "a line without a decision → refused",
+      "pass": true,
+      "detail": "INVALID_INPUT"
+    },
+    {
+      "id": "E3",
+      "name": "unit still unknown → refused (UNRESOLVED)",
+      "pass": true,
+      "detail": "UNRESOLVED"
+    },
+    {
+      "id": "E4",
+      "name": "out-of-stock line → refused (NOT_ORDERABLE)",
+      "pass": true,
+      "detail": "NOT_ORDERABLE"
+    },
+    {
+      "id": "E5",
+      "name": "total changed since the desk looked → refused (PRICE_CHANGED)",
+      "pass": true,
+      "detail": "PRICE_CHANGED"
+    },
+    {
+      "id": "E6",
+      "name": "valid confirmation creates exactly one order; a second confirm creates none",
+      "pass": true,
+      "detail": "{\"first\":true,\"second\":\"duplicate\",\"orders\":1}"
+    }
+  ]
+}
